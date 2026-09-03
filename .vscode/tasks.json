@@ -1,0 +1,178 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Master Controller",
+      "type": "shell",
+      "command": "node",
+      "args": [
+        "scripts/launcher/run-role.js",
+        "master-controller"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "focus": false,
+        "clear": false
+      },
+      "problemMatcher": [],
+      "icon": {
+        "id": "organization",
+        "color": "terminal.ansiBlue"
+      }
+    },
+    {
+      "label": "Dev Team 1",
+      "type": "shell",
+      "command": "node",
+      "args": [
+        "scripts/launcher/run-role.js",
+        "dev-team-1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "focus": false,
+        "clear": false
+      },
+      "problemMatcher": [],
+      "icon": {
+        "id": "code",
+        "color": "terminal.ansiRed"
+      }
+    },
+    {
+      "label": "Dev Team 2",
+      "type": "shell",
+      "command": "node",
+      "args": [
+        "scripts/launcher/run-role.js",
+        "dev-team-2"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "focus": false,
+        "clear": false
+      },
+      "problemMatcher": [],
+      "icon": {
+        "id": "repo-forked",
+        "color": "terminal.ansiBrightYellow"
+      }
+    },
+    {
+      "label": "QA1",
+      "type": "shell",
+      "command": "node",
+      "args": [
+        "scripts/launcher/run-role.js",
+        "qa1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "focus": false,
+        "clear": false
+      },
+      "problemMatcher": [],
+      "icon": {
+        "id": "verified",
+        "color": "terminal.ansiYellow"
+      }
+    },
+    {
+      "label": "Pipeman",
+      "type": "shell",
+      "command": "node",
+      "args": [
+        "scripts/launcher/run-role.js",
+        "pipeman"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "focus": false,
+        "clear": false
+      },
+      "problemMatcher": [],
+      "icon": {
+        "id": "rocket",
+        "color": "terminal.ansiGreen"
+      }
+    },
+    {
+      "label": "LiveQA",
+      "type": "shell",
+      "command": "node",
+      "args": [
+        "scripts/launcher/run-role.js",
+        "liveqa"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "focus": false,
+        "clear": false
+      },
+      "problemMatcher": [],
+      "icon": {
+        "id": "eye",
+        "color": "terminal.ansiMagenta"
+      }
+    },
+    {
+      "label": "Shell",
+      "type": "shell",
+      "command": "exec ${SHELL:-/bin/sh} -l",
+      "windows": {
+        "command": "powershell"
+      },
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "panel": "dedicated",
+        "reveal": "always",
+        "focus": false,
+        "clear": false
+      },
+      "icon": {
+        "id": "terminal"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "FC: Start All",
+      "dependsOn": [
+        "Master Controller",
+        "Dev Team 1",
+        "Dev Team 2",
+        "QA1",
+        "Pipeman",
+        "LiveQA",
+        "Shell"
+      ],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    }
+  ]
+}
