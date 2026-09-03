@@ -77,6 +77,28 @@ describe('login flow', () => {
     assert.match(sessionCookie, /SameSite=Lax/i);
   });
 
+  test('session cookie is scoped to BASE_PATH, not the whole domain', async () => {
+    const rootApp = createApp(buildConfig());
+    const rootRes = await request(rootApp)
+      .post('/login')
+      .type('form')
+      .send({ password: TEST_PASSWORD });
+    const rootCookie = rootRes.headers['set-cookie'].find((c) =>
+      c.startsWith('content-checker.sid=')
+    );
+    assert.match(rootCookie, /Path=\//i);
+
+    const subpathApp = createApp(buildConfig({ basePath: '/content-check' }));
+    const subpathRes = await request(subpathApp)
+      .post('/content-check/login')
+      .type('form')
+      .send({ password: TEST_PASSWORD });
+    const subpathCookie = subpathRes.headers['set-cookie'].find((c) =>
+      c.startsWith('content-checker.sid=')
+    );
+    assert.match(subpathCookie, /Path=\/content-check/i);
+  });
+
   test('a session established by login can reach the protected landing page', async () => {
     const app = createApp(buildConfig());
     const agent = request.agent(app);
@@ -88,20 +110,38 @@ describe('login flow', () => {
     assert.match(res.text, /You're authenticated/);
   });
 
-  test('login rate limiter rejects after the configured ceiling', async () => {
+  test('login rate limiter rejects after the configured ceiling, rendering the login page rather than JSON', async () => {
     const app = createApp(buildConfig());
     const agent = request.agent(app);
 
-    let lastStatus;
+    let lastRes;
     for (let i = 0; i < 11; i += 1) {
-      const res = await agent
-        .post('/login')
-        .type('form')
-        .send({ password: 'wrong-every-time' });
-      lastStatus = res.status;
+      lastRes = await agent.post('/login').type('form').send({ password: 'wrong-every-time' });
     }
 
-    assert.equal(lastStatus, 429);
+    assert.equal(lastRes.status, 429);
+    assert.match(lastRes.headers['content-type'], /text\/html/);
+    assert.ok(lastRes.headers['retry-after'], 'expected a Retry-After header');
+    assert.match(lastRes.text, /Too many login attempts/);
+    // Never lies to the user by reusing the wrong-password copy.
+    assert.doesNotMatch(lastRes.text, /Incorrect password/);
+  });
+
+  test('rate limiter never tells a correct password it was wrong', async () => {
+    const app = createApp(buildConfig());
+    const agent = request.agent(app);
+
+    // Trip the limiter with 10 attempts (any outcome counts against it).
+    for (let i = 0; i < 10; i += 1) {
+      await agent.post('/login').type('form').send({ password: 'wrong-every-time' });
+    }
+
+    // The 11th attempt uses the CORRECT password but is still rate-limited.
+    const res = await agent.post('/login').type('form').send({ password: TEST_PASSWORD });
+
+    assert.equal(res.status, 429);
+    assert.doesNotMatch(res.text, /Incorrect password/);
+    assert.match(res.text, /Too many login attempts/);
   });
 });
 
@@ -120,6 +160,38 @@ describe('logout', () => {
     const afterLogout = await agent.get('/');
     assert.equal(afterLogout.status, 302);
     assert.equal(afterLogout.headers.location, '/login');
+  });
+
+  test('clears the actual session cookie by name, not the express-session default', async () => {
+    const app = createApp(buildConfig());
+    const agent = request.agent(app);
+
+    await agent.post('/login').type('form').send({ password: TEST_PASSWORD });
+    const logoutRes = await agent.post('/logout');
+
+    const cleared = logoutRes.headers['set-cookie'].find((c) =>
+      c.startsWith('content-checker.sid=')
+    );
+    assert.ok(cleared, 'expected a Set-Cookie clearing content-checker.sid');
+    assert.match(cleared, /Expires=Thu, 01 Jan 1970/);
+    // Never the stale, unused express-session default name.
+    assert.ok(
+      !logoutRes.headers['set-cookie'].some((c) => c.startsWith('connect.sid=')),
+      'should not clear a cookie named connect.sid — this app never sets one'
+    );
+  });
+});
+
+describe('Cache-Control on authenticated responses', () => {
+  test('protected pages are sent no-store, so a Back button cannot resurrect them after logout', async () => {
+    const app = createApp(buildConfig());
+    const agent = request.agent(app);
+
+    await agent.post('/login').type('form').send({ password: TEST_PASSWORD });
+    const res = await agent.get('/');
+
+    assert.equal(res.status, 200);
+    assert.match(res.headers['cache-control'], /no-store/);
   });
 });
 

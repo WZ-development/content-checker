@@ -4,24 +4,53 @@ const express = require('express');
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 
+const { SESSION_COOKIE_NAME } = require('../lib/sessionCookie');
+
 const GENERIC_LOGIN_ERROR = 'Incorrect password. Please try again.';
+
+/**
+ * Builds a human-readable rate-limit message from whatever Retry-After
+ * (seconds) express-rate-limit has already set on the response — it sets
+ * this header before invoking a custom `handler`, so it's always present
+ * by the time this runs. Falls back to a generic wait if it's ever absent.
+ */
+function buildRateLimitedMessage(res) {
+  const retryAfterSeconds = Number(res.getHeader('Retry-After'));
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+    const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+    return `Too many login attempts. Please wait about ${minutes} minute${minutes === 1 ? '' : 's'} and try again.`;
+  }
+  return 'Too many login attempts. Please wait a few minutes and try again.';
+}
 
 /**
  * Builds the login/logout router. `urlHelper` is the app's BASE_PATH-aware
  * url() function; `teamPasswordHash` is the bcrypt hash the single shared
- * team password is checked against (never a plaintext comparison).
+ * team password is checked against (never a plaintext comparison);
+ * `cookiePath` is the same BASE_PATH-scoped path the session cookie was
+ * set with, required here too so logout's clearCookie() actually matches
+ * and clears it rather than silently no-op'ing on a path mismatch.
  */
-function createAuthRouter({ urlHelper, teamPasswordHash }) {
+function createAuthRouter({ urlHelper, teamPasswordHash, cookiePath }) {
   const router = express.Router();
 
   // 10 attempts per IP per 15 minutes — a sane ceiling for a single
-  // shared-password gate sitting behind a public domain.
+  // shared-password gate sitting behind a public domain. A custom
+  // handler renders the real login page with a distinct, honest message
+  // instead of express-rate-limit's default bare JSON body — a user who
+  // gets rate-limited is still a person looking at a browser, not an API
+  // client, and they must never be told a correct password was wrong.
   const loginRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 10,
     standardHeaders: true,
     legacyHeaders: false,
-    message: { error: GENERIC_LOGIN_ERROR },
+    handler: (req, res) => {
+      res.status(429).render('login', {
+        error: buildRateLimitedMessage(res),
+        url: urlHelper,
+      });
+    },
   });
 
   router.get('/login', (req, res) => {
@@ -75,7 +104,7 @@ function createAuthRouter({ urlHelper, teamPasswordHash }) {
         next(err);
         return;
       }
-      res.clearCookie('connect.sid');
+      res.clearCookie(SESSION_COOKIE_NAME, { path: cookiePath });
       res.redirect(302, urlHelper('/login'));
     });
   });

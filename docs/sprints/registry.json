@@ -1,5 +1,5 @@
 {
-  "next_id": 6,
+  "next_id": 7,
   "sprints": {
     "1": {
       "title": "Application foundation, shared-password auth, and relative routing",
@@ -30,6 +30,12 @@
       "epic": "Reporting UI",
       "status": "todo",
       "file": "docs/sprints/1-todo/sprint-5_scan-workflow-and-audit-results-ui.md"
+    },
+    "6": {
+      "title": "Production deployment to tools.wordzite.com/content-check",
+      "epic": "Deployment",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-6_production-deployment-to-tools-wordzite-com-content-check.md"
     }
   }
 }

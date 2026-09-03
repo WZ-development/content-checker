@@ -18,6 +18,8 @@ These are real client staging credentials on a box that will eventually answer a
 7. Reject URLs that resolve to loopback, link-local, or private address ranges (`127.0.0.0/8`, `::1`, `10/8`, `172.16/12`, `192.168/16`, `169.254/16`) at save time, with a clear field-level error. This tool makes server-side requests to user-supplied URLs; that is an SSRF surface and this is its first line of defence.
 8. Deleting a project removes its stored credentials from the store entirely, not just its row's visibility.
 9. Unit tests cover: encrypt/decrypt round-trip, the blank-field-keeps-existing-password rule, URL validation accept/reject cases, and the private-range rejection.
+10. **CSRF protection on every state-changing route** (create, edit, delete). Raised by QA1 during Sprint 1's audit and deliberately deferred to here: Sprint 1's two forms were adequately covered by `SameSite=Lax`, but this sprint introduces authenticated routes that mutate stored client credentials, which is where a token starts earning its cost. Reject a POST with a missing or invalid token, and render a usable error rather than a raw JSON body.
+11. **Every authenticated response that can carry project data or credentials must send `Cache-Control: no-store`** (plus `no-cache, must-revalidate`). Sprint 1's fix loop establishes this for authenticated responses generally; this sprint must confirm it holds for the screens it adds. LiveQA demonstrated on Sprint 1 that without it, the browser Back button re-renders an authenticated page after logout from cache — on these screens that is a client-credential leak on any shared machine.
 
 ### Acceptance Criteria
 - QA1 confirms the encryption is authenticated (GCM or equivalent), that a unique IV/nonce is generated per encryption rather than reused or hardcoded, and that `ENCRYPTION_KEY` is read from the environment and never has a default fallback.
@@ -27,7 +29,10 @@ These are real client staging credentials on a box that will eventually answer a
 - QA1 verifies the edit-form password rule by test: save a project with a password, edit and save with the password field blank, confirm the original password still decrypts correctly; then edit with a new value and confirm it replaces the old one; then use the clear control and confirm it is gone.
 - QA1 confirms URL validation rejects `ftp://`, a bare `clientdomain.com` with no scheme, an empty string, and `http://192.168.1.10/` — asserting on the field-level error message shown in each case, not only that the save failed.
 - QA1 confirms deleting a project leaves no trace of its credential row in the store.
+- QA1 confirms every state-changing route rejects a POST with a missing or invalid CSRF token, asserting on the rejection response, and that a valid token succeeds.
+- QA1 confirms the project list and project edit responses carry `Cache-Control: no-store`, asserting on the actual response header.
 - QA1 runs `npm test` and `npm run lint`; both pass, with the four required test areas present.
+- **LiveQA repeats Sprint 1's Back-button check on these screens specifically**: log in, open the project list with a saved project, log out, press Back, and confirm the credential-bearing page does not re-render from cache.
 - LiveQA creates a project with credentials, edits it leaving the password blank and confirms the "password stored" indicator still shows, edits it with a new password, clears the credentials, and deletes the project — confirming each screen renders correctly and the confirmation step on delete actually blocks an accidental click.
 
 ### Out of Scope
@@ -46,4 +51,5 @@ These are real client staging credentials on a box that will eventually answer a
 - **The edit-password rule is the single most likely thing to be built wrong**, because "blank means keep" and "blank means clear" are both defensible readings and only one matches PRD §4.2's workflow. Requirement 5 states it explicitly and the acceptance criteria test all three transitions.
 - **Encryption implemented with a static IV**, which silently destroys the security property while every test still passes. Called out as an explicit QA1 check rather than left to a general "is the crypto good" judgement.
 - **File collision with Sprint 3** running in parallel. Mitigated by the ownership line in Dependencies and by Sprint 3 working in its own worktree.
+- **The `Cache-Control` fix regressing on new routes**, because Sprint 1 fixed it on the routes that existed then. Mitigated by requirement 11 and by giving LiveQA its own Back-button check on this sprint's screens rather than assuming inheritance.
 - **SSRF filtering treated as Sprint 3's problem** because that is where fetching happens. Save-time rejection belongs here, at the point of entry; Sprint 3 adds request-time checks as defence in depth. Both layers are required — DNS can resolve to a private address after a save-time check passes.

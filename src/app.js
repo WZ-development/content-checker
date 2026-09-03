@@ -5,7 +5,9 @@ const express = require('express');
 const session = require('express-session');
 
 const { createUrlHelper } = require('./lib/url');
+const { SESSION_COOKIE_NAME } = require('./lib/sessionCookie');
 const { createRequireAuth } = require('./middleware/auth');
+const { noStore } = require('./middleware/noStore');
 const { createAuthRouter } = require('./routes/auth');
 const { createHealthRouter } = require('./routes/health');
 const { createLandingRouter } = require('./routes/landing');
@@ -31,10 +33,16 @@ function createApp(config) {
 
   const appRouter = express.Router();
 
+  // Scoping the cookie to BASE_PATH (rather than the express-session
+  // default of "/") matters on a shared host: production mounts this app
+  // at /content-check alongside sibling tools on the same domain, and an
+  // unscoped cookie would be sent to every one of them.
+  const cookiePath = config.basePath || '/';
+
   appRouter.use(express.urlencoded({ extended: false }));
   appRouter.use(
     session({
-      name: 'content-checker.sid',
+      name: SESSION_COOKIE_NAME,
       secret: config.sessionSecret,
       resave: false,
       saveUninitialized: false,
@@ -42,6 +50,7 @@ function createApp(config) {
         httpOnly: true,
         sameSite: 'lax',
         secure: 'auto',
+        path: cookiePath,
       },
     })
   );
@@ -50,11 +59,16 @@ function createApp(config) {
   // check, static assets, then the login/logout routes.
   appRouter.use(createHealthRouter());
   appRouter.use(express.static(path.join(__dirname, '..', 'public')));
-  appRouter.use(createAuthRouter({ urlHelper, teamPasswordHash: config.teamPasswordHash }));
+  appRouter.use(
+    createAuthRouter({ urlHelper, teamPasswordHash: config.teamPasswordHash, cookiePath })
+  );
 
   // Everything registered from here down requires an authenticated
-  // session.
+  // session. noStore is deliberately scoped to only this part of the
+  // chain — protected content must never be cacheable, so a browser's
+  // Back button can't resurrect it after logout.
   appRouter.use(createRequireAuth(urlHelper));
+  appRouter.use(noStore);
   appRouter.use(createLandingRouter({ urlHelper }));
 
   appRouter.use((req, res) => {
