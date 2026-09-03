@@ -1,0 +1,35 @@
+{
+  "next_id": 6,
+  "sprints": {
+    "1": {
+      "title": "Application foundation, shared-password auth, and relative routing",
+      "epic": "Foundation & Access",
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-1_application-foundation-shared-password-auth-and-relative-routing.md"
+    },
+    "2": {
+      "title": "Project store with encrypted staging credentials",
+      "epic": "Foundation & Access",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-2_project-store-with-encrypted-staging-credentials.md"
+    },
+    "3": {
+      "title": "Sitemap discovery and recursive parsing engine",
+      "epic": "Sitemap Engine",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-3_sitemap-discovery-and-recursive-parsing-engine.md"
+    },
+    "4": {
+      "title": "Content comparison and title resolution",
+      "epic": "Sitemap Engine",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-4_content-comparison-and-title-resolution.md"
+    },
+    "5": {
+      "title": "Scan workflow and audit results UI",
+      "epic": "Reporting UI",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-5_scan-workflow-and-audit-results-ui.md"
+    }
+  }
+}

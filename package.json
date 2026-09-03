@@ -1,0 +1,31 @@
+{
+  "name": "content-checker",
+  "version": "0.1.0",
+  "description": "Content Checker — shared-password-gated Express app for the tools.wordzite.com/content-check sitemap audit tool.",
+  "private": true,
+  "type": "commonjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "lint": "eslint .",
+    "hash-password": "node bin/hash-password.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^17.4.2",
+    "ejs": "^6.0.1",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.7.0",
+    "express-session": "^1.19.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.9.1",
+    "globals": "^17.12.0",
+    "supertest": "^7.2.2"
+  }
+}

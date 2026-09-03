@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Content Checker</title>
+  <link rel="stylesheet" href="<%= url('/style.css') %>">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <h1>Content Checker</h1>
+      <form method="post" action="<%= url('/logout') %>">
+        <button type="submit" class="link-button">Log out</button>
+      </form>
+    </header>
+    <p>You're authenticated. Project management arrives in Sprint 2.</p>
+  </main>
+</body>
+</html>
