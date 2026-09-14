@@ -16,8 +16,8 @@
     "3": {
       "title": "Sitemap discovery and recursive parsing engine",
       "epic": "Sitemap Engine",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-3_sitemap-discovery-and-recursive-parsing-engine.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-3_sitemap-discovery-and-recursive-parsing-engine.md"
     },
     "4": {
       "title": "Content comparison and title resolution",
