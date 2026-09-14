@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<%- include('../partials/head', { title: 'Delete project — Content Checker' }) %>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <h1>Delete project</h1>
+    </header>
+
+    <p>Delete <strong><%= project.name %></strong> and its stored credentials? This cannot be undone.</p>
+
+    <form method="post" action="<%= url('/projects/' + project.id + '/delete') %>">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+      <button type="submit" class="button-danger">Yes, delete</button>
+      <a href="<%= url('/projects') %>" class="button-link">Cancel</a>
+    </form>
+  </main>
+</body>
+</html>

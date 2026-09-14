@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<%- include('partials/head', { title: title || 'Error' }) %>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <h1>Content Checker</h1>
+    </header>
+    <p class="error" role="alert"><%= message %></p>
+    <p><a href="<%= url('/projects') %>">Back to projects</a></p>
+  </main>
+</body>
+</html>

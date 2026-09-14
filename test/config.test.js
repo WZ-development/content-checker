@@ -5,14 +5,20 @@ const assert = require('node:assert/strict');
 
 const { loadConfig, ConfigError } = require('../src/config');
 
+const VALID_ENCRYPTION_KEY = 'ab'.repeat(32); // 64 hex chars = 32 bytes
+
 const VALID_ENV = {
   SESSION_SECRET: 'a-very-secret-value',
   TEAM_PASSWORD_HASH: '$2a$12$abcdefghijklmnopqrstuv',
+  ENCRYPTION_KEY: VALID_ENCRYPTION_KEY,
 };
 
 describe('loadConfig', () => {
   test('throws a ConfigError naming SESSION_SECRET when it is missing', () => {
-    const env = { TEAM_PASSWORD_HASH: VALID_ENV.TEAM_PASSWORD_HASH };
+    const env = {
+      TEAM_PASSWORD_HASH: VALID_ENV.TEAM_PASSWORD_HASH,
+      ENCRYPTION_KEY: VALID_ENV.ENCRYPTION_KEY,
+    };
     assert.throws(
       () => loadConfig(env),
       (err) => {
@@ -36,7 +42,10 @@ describe('loadConfig', () => {
   });
 
   test('throws a ConfigError naming TEAM_PASSWORD_HASH when it is missing', () => {
-    const env = { SESSION_SECRET: VALID_ENV.SESSION_SECRET };
+    const env = {
+      SESSION_SECRET: VALID_ENV.SESSION_SECRET,
+      ENCRYPTION_KEY: VALID_ENV.ENCRYPTION_KEY,
+    };
     assert.throws(
       () => loadConfig(env),
       (err) => {
@@ -47,10 +56,54 @@ describe('loadConfig', () => {
     );
   });
 
+  test('throws a ConfigError naming ENCRYPTION_KEY when it is missing', () => {
+    const env = {
+      SESSION_SECRET: VALID_ENV.SESSION_SECRET,
+      TEAM_PASSWORD_HASH: VALID_ENV.TEAM_PASSWORD_HASH,
+    };
+    assert.throws(
+      () => loadConfig(env),
+      (err) => {
+        assert.ok(err instanceof ConfigError);
+        assert.match(err.message, /ENCRYPTION_KEY/);
+        return true;
+      }
+    );
+  });
+
+  test('throws a ConfigError naming ENCRYPTION_KEY when it is the wrong length', () => {
+    const env = { ...VALID_ENV, ENCRYPTION_KEY: 'abcd1234' }; // valid hex, wrong byte length
+    assert.throws(
+      () => loadConfig(env),
+      (err) => {
+        assert.ok(err instanceof ConfigError);
+        assert.match(err.message, /ENCRYPTION_KEY/);
+        return true;
+      }
+    );
+  });
+
+  test('throws a ConfigError naming ENCRYPTION_KEY when it is not valid hex', () => {
+    // 64 characters, the right *string* length, but not hex — must not
+    // slip past a naive length-only check.
+    const env = { ...VALID_ENV, ENCRYPTION_KEY: 'z'.repeat(64) };
+    assert.throws(
+      () => loadConfig(env),
+      (err) => {
+        assert.ok(err instanceof ConfigError);
+        assert.match(err.message, /ENCRYPTION_KEY/);
+        return true;
+      }
+    );
+  });
+
   test('loads successfully with all required variables present', () => {
     const config = loadConfig(VALID_ENV);
     assert.equal(config.sessionSecret, VALID_ENV.SESSION_SECRET);
     assert.equal(config.teamPasswordHash, VALID_ENV.TEAM_PASSWORD_HASH);
+    assert.ok(Buffer.isBuffer(config.encryptionKey));
+    assert.equal(config.encryptionKey.length, 32);
+    assert.equal(config.encryptionKey.toString('hex'), VALID_ENCRYPTION_KEY);
     assert.equal(config.port, 3000);
     assert.equal(config.basePath, '');
   });

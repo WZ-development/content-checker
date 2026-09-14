@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<%- include('../partials/head', { title: (isEdit ? 'Edit project' : 'New project') + ' — Content Checker' }) %>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <h1><%= isEdit ? 'Edit project' : 'New project' %></h1>
+      <nav class="header-actions">
+        <a href="<%= url('/projects') %>">Projects</a>
+      </nav>
+    </header>
+
+    <form method="post" action="<%= isEdit ? url('/projects/' + project.id) : url('/projects') %>" class="project-form" novalidate>
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+      <div class="field">
+        <label for="name">Project name</label>
+        <input type="text" id="name" name="name" value="<%= project.name || '' %>" required>
+        <% if (errors.name) { %><p class="field-error"><%= errors.name %></p><% } %>
+      </div>
+
+      <div class="field">
+        <label for="liveUrl">Live URL</label>
+        <input type="text" id="liveUrl" name="liveUrl" value="<%= project.liveUrl || '' %>" required>
+        <% if (errors.liveUrl) { %><p class="field-error"><%= errors.liveUrl %></p><% } %>
+      </div>
+
+      <div class="field">
+        <label for="stagingUrl">Staging URL</label>
+        <input type="text" id="stagingUrl" name="stagingUrl" value="<%= project.stagingUrl || '' %>" required>
+        <% if (errors.stagingUrl) { %><p class="field-error"><%= errors.stagingUrl %></p><% } %>
+      </div>
+
+      <fieldset class="field-group">
+        <legend>Staging HTTP Basic Auth (optional)</legend>
+
+        <div class="field">
+          <label for="basicAuthUsername">Username</label>
+          <input type="text" id="basicAuthUsername" name="basicAuthUsername" value="<%= project.basicAuthUsername || '' %>">
+        </div>
+
+        <div class="field">
+          <label for="basicAuthPassword">Password</label>
+          <input type="password" id="basicAuthPassword" name="basicAuthPassword" autocomplete="new-password">
+          <p class="field-hint">
+            <% if (isEdit && project.hasPassword) { %>
+              A password is currently stored. Leave blank to keep it, or enter a new one to replace it.
+            <% } else if (isEdit) { %>
+              No password is currently stored.
+            <% } else { %>
+              Leave blank if this staging site needs no basic-auth password.
+            <% } %>
+          </p>
+        </div>
+
+        <% if (isEdit && project.hasPassword) { %>
+          <div class="field field-checkbox">
+            <label>
+              <input type="checkbox" name="clearCredentials">
+              Clear stored credentials
+            </label>
+          </div>
+        <% } %>
+      </fieldset>
+
+      <button type="submit"><%= isEdit ? 'Save changes' : 'Create project' %></button>
+    </form>
+  </main>
+</body>
+</html>

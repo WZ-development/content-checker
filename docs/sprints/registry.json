@@ -10,8 +10,8 @@
     "2": {
       "title": "Project store with encrypted staging credentials",
       "epic": "Foundation & Access",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-2_project-store-with-encrypted-staging-credentials.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-2_project-store-with-encrypted-staging-credentials.md"
     },
     "3": {
       "title": "Sitemap discovery and recursive parsing engine",

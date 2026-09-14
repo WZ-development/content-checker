@@ -10,16 +10,29 @@ npm install
 cp .env.example .env
 ```
 
-Generate a session secret and a password hash, then fill them into `.env`:
+Generate a session secret, a password hash, and an encryption key, then
+fill them into `.env`:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 npm run hash-password -- 'your-team-password'
+npm run generate-encryption-key
 ```
 
-`.env` at minimum needs `SESSION_SECRET` and `TEAM_PASSWORD_HASH` — the app
-refuses to start without either. `PORT` defaults to `3000`, `BASE_PATH`
-defaults to `/`.
+`.env` at minimum needs `SESSION_SECRET`, `TEAM_PASSWORD_HASH`, and
+`ENCRYPTION_KEY` — the app refuses to start without any of them. `PORT`
+defaults to `3000`, `BASE_PATH` defaults to `/`.
+
+Note: both `hash-password` and `generate-encryption-key` take/print
+secrets through argv/stdout, which land in shell history and scrollback —
+fine for local dev, but clear your history or use a leading space (most
+shells skip history for a command starting with one) if that matters on
+a shared machine.
+
+Projects (name, live/staging URLs, optional HTTP Basic Auth credentials)
+are stored in a local SQLite file at `data/content-checker.db`, created
+automatically on first run. Basic-auth passwords are encrypted at rest
+with `ENCRYPTION_KEY` (AES-256-GCM) — the file itself is gitignored.
 
 ## Run
 

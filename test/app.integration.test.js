@@ -6,31 +6,48 @@ const bcrypt = require('bcryptjs');
 const request = require('supertest');
 
 const { createApp } = require('../src/app');
+const { openDatabase } = require('../src/db/database');
+const { createProjectsRepository } = require('../src/db/projectsRepository');
 
 const TEST_PASSWORD = 'correct-horse-battery-staple';
 const TEAM_PASSWORD_HASH = bcrypt.hashSync(TEST_PASSWORD, 4); // low cost factor: tests only
+const TEST_ENCRYPTION_KEY = Buffer.from('ab'.repeat(32), 'hex'); // 32 bytes
 
 function buildConfig(overrides = {}) {
   return {
     port: 0,
     sessionSecret: 'test-session-secret',
     teamPasswordHash: TEAM_PASSWORD_HASH,
+    encryptionKey: TEST_ENCRYPTION_KEY,
     basePath: '',
     nodeEnv: 'test',
     ...overrides,
   };
 }
 
+/**
+ * Builds a fully wired app for these Sprint 1 auth tests, backed by an
+ * in-memory database (never the real data/content-checker.db file) — a
+ * fresh one per call, so tests never share or leak state through it.
+ * Sprint 2's own tests (test/routes/projects.integration.test.js) are
+ * what actually exercises the projects store; these just need *an* app
+ * that boots without touching disk.
+ */
+function createTestApp(overrides = {}) {
+  const repository = createProjectsRepository(openDatabase(':memory:'), TEST_ENCRYPTION_KEY);
+  return createApp(buildConfig(overrides), { repository });
+}
+
 describe('GET /healthz', () => {
   test('is reachable without authentication and returns 200 JSON', async () => {
-    const app = createApp(buildConfig());
+    const app = createTestApp();
     const res = await request(app).get('/healthz');
     assert.equal(res.status, 200);
     assert.equal(res.body.status, 'ok');
   });
 
   test('honours a non-root BASE_PATH', async () => {
-    const app = createApp(buildConfig({ basePath: '/content-check' }));
+    const app = createTestApp({ basePath: '/content-check' });
     const res = await request(app).get('/content-check/healthz');
     assert.equal(res.status, 200);
   });
@@ -38,7 +55,7 @@ describe('GET /healthz', () => {
 
 describe('protected routes', () => {
   test('an unauthenticated request to a protected route redirects to login (302), not 500', async () => {
-    const app = createApp(buildConfig());
+    const app = createTestApp();
     const res = await request(app).get('/');
     assert.equal(res.status, 302);
     assert.equal(res.headers.location, '/login');
@@ -47,7 +64,7 @@ describe('protected routes', () => {
 
 describe('login flow', () => {
   test('wrong password returns a generic failure message, not a 500 or specific reason', async () => {
-    const app = createApp(buildConfig());
+    const app = createTestApp();
     const res = await request(app)
       .post('/login')
       .type('form')
@@ -60,7 +77,7 @@ describe('login flow', () => {
   });
 
   test('correct password sets an httpOnly, SameSite=Lax session cookie and redirects in', async () => {
-    const app = createApp(buildConfig());
+    const app = createTestApp();
     const res = await request(app)
       .post('/login')
       .type('form')
@@ -78,7 +95,7 @@ describe('login flow', () => {
   });
 
   test('session cookie is scoped to BASE_PATH, not the whole domain', async () => {
-    const rootApp = createApp(buildConfig());
+    const rootApp = createTestApp();
     const rootRes = await request(rootApp)
       .post('/login')
       .type('form')
@@ -88,7 +105,7 @@ describe('login flow', () => {
     );
     assert.match(rootCookie, /Path=\//i);
 
-    const subpathApp = createApp(buildConfig({ basePath: '/content-check' }));
+    const subpathApp = createTestApp({ basePath: '/content-check' });
     const subpathRes = await request(subpathApp)
       .post('/content-check/login')
       .type('form')
@@ -100,7 +117,7 @@ describe('login flow', () => {
   });
 
   test('a session established by login can reach the protected landing page', async () => {
-    const app = createApp(buildConfig());
+    const app = createTestApp();
     const agent = request.agent(app);
 
     await agent.post('/login').type('form').send({ password: TEST_PASSWORD });
@@ -111,7 +128,7 @@ describe('login flow', () => {
   });
 
   test('login rate limiter rejects after the configured ceiling, rendering the login page rather than JSON', async () => {
-    const app = createApp(buildConfig());
+    const app = createTestApp();
     const agent = request.agent(app);
 
     let lastRes;
@@ -128,7 +145,7 @@ describe('login flow', () => {
   });
 
   test('rate limiter never tells a correct password it was wrong', async () => {
-    const app = createApp(buildConfig());
+    const app = createTestApp();
     const agent = request.agent(app);
 
     // Trip the limiter with 10 attempts (any outcome counts against it).
@@ -147,7 +164,7 @@ describe('login flow', () => {
 
 describe('logout', () => {
   test('destroys the session and the protected route becomes inaccessible again', async () => {
-    const app = createApp(buildConfig());
+    const app = createTestApp();
     const agent = request.agent(app);
 
     await agent.post('/login').type('form').send({ password: TEST_PASSWORD });
@@ -163,7 +180,7 @@ describe('logout', () => {
   });
 
   test('clears the actual session cookie by name, not the express-session default', async () => {
-    const app = createApp(buildConfig());
+    const app = createTestApp();
     const agent = request.agent(app);
 
     await agent.post('/login').type('form').send({ password: TEST_PASSWORD });
@@ -184,7 +201,7 @@ describe('logout', () => {
 
 describe('Cache-Control on authenticated responses', () => {
   test('protected pages are sent no-store, so a Back button cannot resurrect them after logout', async () => {
-    const app = createApp(buildConfig());
+    const app = createTestApp();
     const agent = request.agent(app);
 
     await agent.post('/login').type('form').send({ password: TEST_PASSWORD });
@@ -197,7 +214,7 @@ describe('Cache-Control on authenticated responses', () => {
 
 describe('BASE_PATH honoured in rendered templates', () => {
   test('every internal href/action/asset src is prefixed with BASE_PATH', async () => {
-    const app = createApp(buildConfig({ basePath: '/content-check' }));
+    const app = createTestApp({ basePath: '/content-check' });
     const res = await request(app).get('/content-check/login');
 
     assert.equal(res.status, 200);

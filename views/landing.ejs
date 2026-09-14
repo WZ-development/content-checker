@@ -1,26 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Content Checker</title>
-  <link rel="stylesheet" href="<%= url('/style.css') %>">
-  <script>
-    // Cache-Control: no-store keeps this page out of the HTTP disk cache,
-    // but it has no effect on Chrome's bfcache (back/forward cache), which
-    // restores a full in-memory snapshot of the page — including its DOM
-    // and any JS state — on Back/Forward, bypassing the network entirely.
-    // Without this, logging out and pressing Back re-displays this exact
-    // authenticated page from that snapshot. event.persisted is true only
-    // on a bfcache restore (never on a normal/first load), so force a
-    // real reload in that case, which re-requests the page from the
-    // server and lets requireAuth redirect to login for a dead session.
-    window.addEventListener('pageshow', function (event) {
-      if (event.persisted) {
-        window.location.reload();
-      }
-    });
-  </script>
+<%- include('partials/head', { title: 'Content Checker' }) %>
 </head>
 <body>
   <main class="app-shell">
@@ -30,7 +11,7 @@
         <button type="submit" class="link-button">Log out</button>
       </form>
     </header>
-    <p>You're authenticated. Project management arrives in Sprint 2.</p>
+    <p>You're authenticated. <a href="<%= url('/projects') %>">Manage projects</a>.</p>
   </main>
 </body>
 </html>

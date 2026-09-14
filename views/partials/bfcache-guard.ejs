@@ -1,0 +1,22 @@
+<script>
+  // Cache-Control: no-store keeps this page out of the HTTP disk cache,
+  // but it has no effect on Chrome's bfcache (back/forward cache), which
+  // restores a full in-memory snapshot of the page — including its DOM
+  // and any JS state — on Back/Forward, bypassing the network entirely.
+  // Without this, logging out and pressing Back re-displays this exact
+  // authenticated page from that snapshot. event.persisted is true only
+  // on a bfcache restore (never on a normal/first load), so force a
+  // real reload in that case, which re-requests the page from the
+  // server and lets requireAuth redirect to login for a dead session.
+  //
+  // Shared by every authenticated view (via partials/head.ejs) rather
+  // than pasted into each one — Sprint 1 originally had this inline in
+  // just views/landing.ejs, and Sprint 2's own sprint file flagged that
+  // as the exact kind of per-page duplication that gets forgotten on
+  // the next screen.
+  window.addEventListener('pageshow', function (event) {
+    if (event.persisted) {
+      window.location.reload();
+    }
+  });
+</script>

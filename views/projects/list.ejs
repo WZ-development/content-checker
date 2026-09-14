@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<%- include('../partials/head', { title: 'Projects — Content Checker' }) %>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <h1>Projects</h1>
+      <nav class="header-actions">
+        <a href="<%= url('/') %>">Home</a>
+        <form method="post" action="<%= url('/logout') %>">
+          <button type="submit" class="link-button">Log out</button>
+        </form>
+      </nav>
+    </header>
+
+    <p><a href="<%= url('/projects/new') %>" class="button-link">New project</a></p>
+
+    <% if (projects.length === 0) { %>
+      <p>No projects yet.</p>
+    <% } else { %>
+      <table class="project-table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Live URL</th>
+            <th>Staging URL</th>
+            <th>Credentials</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% projects.forEach(function (project) { %>
+            <tr>
+              <td><%= project.name %></td>
+              <td><a href="<%= project.liveUrl %>" target="_blank" rel="noopener noreferrer"><%= project.liveUrl %></a></td>
+              <td><a href="<%= project.stagingUrl %>" target="_blank" rel="noopener noreferrer"><%= project.stagingUrl %></a></td>
+              <td><%= project.hasPassword ? 'Password stored' : 'No password' %></td>
+              <td class="row-actions">
+                <a href="<%= url('/projects/' + project.id + '/edit') %>">Edit</a>
+                <a href="<%= url('/projects/' + project.id + '/delete') %>">Delete</a>
+              </td>
+            </tr>
+          <% }); %>
+        </tbody>
+      </table>
+    <% } %>
+  </main>
+</body>
+</html>

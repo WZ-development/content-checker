@@ -12,7 +12,8 @@
     "start": "node src/server.js",
     "test": "node --test",
     "lint": "eslint .",
-    "hash-password": "node bin/hash-password.js"
+    "hash-password": "node bin/hash-password.js",
+    "generate-encryption-key": "node bin/generate-encryption-key.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
