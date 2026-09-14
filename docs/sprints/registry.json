@@ -4,8 +4,8 @@
     "1": {
       "title": "Application foundation, shared-password auth, and relative routing",
       "epic": "Foundation & Access",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-1_application-foundation-shared-password-auth-and-relative-routing.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-1_application-foundation-shared-password-auth-and-relative-routing--done.md"
     },
     "2": {
       "title": "Project store with encrypted staging credentials",
