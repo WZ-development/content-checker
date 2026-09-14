@@ -3,52 +3,38 @@
 const net = require('node:net');
 
 /**
- * Checks a literal IPv4 address string against the ranges requirement 7
- * names: loopback, the three private-use blocks, and link-local.
+ * Built once at module load from the exact ranges requirement 7 names —
+ * not a hand-rolled octet comparison. That distinction is the actual
+ * fix here: a prior version of this module matched IPv4-mapped IPv6
+ * addresses (::ffff:a.b.c.d) against a regex that only recognized the
+ * dotted-quad spelling, but new URL() normalizes a bracketed IPv6 host
+ * to its canonical hex-group form (::ffff:7f00:1, not ::ffff:127.0.0.1)
+ * before this module ever sees it — so the regex never fired on the
+ * actual code path, only on a spelling nothing upstream produces.
+ * net.BlockList.check() understands IPv4-mapped addresses in either
+ * spelling natively, because it operates on the address's real value
+ * rather than its string form, which is the class of bug this fix
+ * closes, not just this one instance of it.
  */
-function isPrivateIPv4(ip) {
-  const octets = ip.split('.').map(Number);
-  if (octets.length !== 4 || octets.some((n) => Number.isNaN(n) || n < 0 || n > 255)) {
-    return false;
-  }
-  const [a, b] = octets;
-
-  if (a === 127) return true; // 127.0.0.0/8 — loopback
-  if (a === 10) return true; // 10.0.0.0/8
-  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
-  if (a === 192 && b === 168) return true; // 192.168.0.0/16
-  if (a === 169 && b === 254) return true; // 169.254.0.0/16 — link-local
-
-  return false;
-}
-
-/**
- * Checks a literal IPv6 address string. Covers ::1 (the address
- * requirement 7 names) plus IPv4-mapped IPv6 addresses like
- * ::ffff:127.0.0.1 — without this, a hostname resolving only to an
- * IPv4-mapped form would sail through the IPv6 branch untested despite
- * describing exactly the same loopback/private host the IPv4 branch
- * exists to catch. Beyond that, stays to what requirement 7 specifies
- * rather than guessing at a fuller IPv6 private-range list.
- */
-function isPrivateIPv6(ip) {
-  const normalized = ip.toLowerCase();
-  if (normalized === '::1') return true;
-
-  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
-  if (mapped) return isPrivateIPv4(mapped[1]);
-
-  return false;
-}
+const blockList = new net.BlockList();
+blockList.addSubnet('127.0.0.0', 8, 'ipv4'); // loopback
+blockList.addSubnet('10.0.0.0', 8, 'ipv4');
+blockList.addSubnet('172.16.0.0', 12, 'ipv4');
+blockList.addSubnet('192.168.0.0', 16, 'ipv4');
+blockList.addSubnet('169.254.0.0', 16, 'ipv4'); // link-local
+blockList.addAddress('::1', 'ipv6'); // loopback
 
 /**
  * True if `ip` (a literal address, not a hostname) falls in a loopback,
- * private-use, or link-local range. Used both on a URL's hostname when
- * it's already a literal IP, and on every address a hostname resolves to.
+ * private-use, or link-local range — the exact set requirement 7 names
+ * (127.0.0.0/8, 10/8, 172.16/12, 192.168/16, 169.254/16, ::1) — including
+ * an IPv4-mapped IPv6 form of any of the IPv4 ranges, in either spelling.
+ * Used both on a URL's hostname when it's already a literal IP, and on
+ * every address a hostname resolves to.
  */
 function isPrivateOrReservedAddress(ip) {
-  if (net.isIPv4(ip)) return isPrivateIPv4(ip);
-  if (net.isIPv6(ip)) return isPrivateIPv6(ip);
+  if (net.isIPv4(ip)) return blockList.check(ip, 'ipv4');
+  if (net.isIPv6(ip)) return blockList.check(ip, 'ipv6');
   return false;
 }
 

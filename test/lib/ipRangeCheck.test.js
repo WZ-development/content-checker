@@ -16,8 +16,16 @@ describe('isPrivateOrReservedAddress', () => {
     ['192.168.1.10', '192.168/16 (the acceptance-criteria example)'],
     ['169.254.0.1', '169.254/16 link-local'],
     ['::1', 'IPv6 loopback'],
-    ['::ffff:127.0.0.1', 'IPv4-mapped IPv6 loopback'],
-    ['::ffff:192.168.1.1', 'IPv4-mapped IPv6 private'],
+    ['::ffff:127.0.0.1', 'IPv4-mapped IPv6 loopback, dotted-quad spelling'],
+    ['::ffff:192.168.1.1', 'IPv4-mapped IPv6 private, dotted-quad spelling'],
+    // The hex-group spelling — what new URL() actually produces for a
+    // bracketed IPv4-mapped host (see urlValidation.test.js for the
+    // full exploit path through normalizeAndValidateUrl). QA1's Sprint
+    // 2 audit found the previous implementation checked only the
+    // dotted-quad form above and never received this one in practice.
+    ['::ffff:7f00:1', 'IPv4-mapped IPv6 loopback, hex-group spelling (127.0.0.1)'],
+    ['::ffff:c0a8:10a', 'IPv4-mapped IPv6 private, hex-group spelling (192.168.1.10)'],
+    ['::ffff:a00:1', 'IPv4-mapped IPv6 private, hex-group spelling (10.0.0.1)'],
   ];
 
   for (const [ip, label] of privateAddresses) {
