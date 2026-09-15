@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap>
+    <loc>https://example.test/page-sitemap.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://example.test/post-sitemap.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://example.test/post-sitemap2.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://example.test/product-sitemap.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://example.test/category-sitemap.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://example.test/author-sitemap.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://example.test/tag-sitemap.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://example.test/media-sitemap.xml</loc>
+  </sitemap>
+  <sitemap>
+    <loc>https://example.test/gallery-sitemap.xml</loc>
+  </sitemap>
+</sitemapindex>

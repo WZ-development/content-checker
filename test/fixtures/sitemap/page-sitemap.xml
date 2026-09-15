@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<?xml-stylesheet type="text/xsl" href="//example.test/main-sitemap.xsl"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <url>
+    <loc>https://example.test/about/</loc>
+    <lastmod>2026-01-05T12:00:00+00:00</lastmod>
+    <image:image>
+      <image:loc>https://example.test/wp-content/uploads/about-hero.jpg</image:loc>
+    </image:image>
+  </url>
+  <url>
+    <loc>https://example.test/contact/</loc>
+    <lastmod>2026-01-06T09:30:00+00:00</lastmod>
+  </url>
+</urlset>

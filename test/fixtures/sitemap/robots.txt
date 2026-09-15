@@ -1,0 +1,5 @@
+# Example robots.txt with a Sitemap directive, as observed on real sites.
+User-agent: *
+Disallow: /wp-admin/
+
+Sitemap: https://example.test/sitemap_index.xml

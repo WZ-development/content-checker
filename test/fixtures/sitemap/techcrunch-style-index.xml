@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <sitemap><loc>https://example.test/sitemap-page-1.xml</loc></sitemap>
+  <sitemap><loc>https://example.test/sitemap-page-2.xml</loc></sitemap>
+  <sitemap><loc>https://example.test/sitemap-page-3.xml</loc></sitemap>
+  <sitemap><loc>https://example.test/sitemap-page-4.xml</loc></sitemap>
+  <sitemap><loc>https://example.test/sitemap-page-5.xml</loc></sitemap>
+  <sitemap><loc>https://example.test/sitemap-page-6.xml</loc></sitemap>
+</sitemapindex>
