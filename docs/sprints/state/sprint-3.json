@@ -1,13 +1,13 @@
 {
   "id": 3,
   "title": "Sitemap discovery and recursive parsing engine",
-  "phase": "dev_agreed_done",
+  "phase": "liveqa_live",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "caa5049bbcdd249c5b1c53ab2489a5cc8906d9ef2a9cadfdbbc2f955e1f0a997",
-  "qa1_audited_tree_hash": "b337a26cf84f5c6fc7e305d87fb0c27f7a79e404",
-  "last_shipped_commit": null,
+  "qa1_audited_tree_hash": "2571fe78a455c89532483b6e745ba9be1c94fd1f",
+  "last_shipped_commit": "39da8b7739952b8b2973728d4b96a051e50c306d",
   "groundtruth_result": null,
-  "audit_rounds": 2,
+  "audit_rounds": 3,
   "live_test_rounds": 0,
   "started": "2026-09-14T22:59:38+00:00",
   "completed": null,
@@ -35,6 +35,24 @@
       "actor": "dev-team",
       "event": "dev_agreed_done",
       "detail": ""
+    },
+    {
+      "ts": "2026-09-15T18:52:16+00:00",
+      "actor": "qa1",
+      "event": "audit",
+      "detail": "PASS: QA1 STATIC AUDIT \u2014 SPRINT 3 \u2014 ROUND 3 (MERGE RE-AUDIT, triggered by /sprint-ship's tree-hash refusal) \u2014 VERDICT: PASS\nAudited commit 39da8b7739952b8b2973728d4b96a051e50c306d on main (merge of devteam2/sprint-3 @ f6a3cfe into main @ 365da6f, --no-ff). Working tree clean; committed. Verdict recorded from main, where the sprint's state now lives.\nSprint file re-read fresh: byte-identical to the copy audited in rounds 1-2 (sha256 caa5049b..., matching the recorded qa1_audit_file_hash). No cross-version criterion applies.\n\nWHY THIS ROUND EXISTS \u2014 and a correction to my own round-2 note\nPipeman ran /sprint-ship 3 and the tool refused: the merge commit's tree hash differs from the one recorded at round 2. Pipeman read the script rather than trusting the handoffs and is correct: qa1_audited_tree_hash is the WHOLE-REPO tree (git rev-parse <commit>^{tree}), not path-scoped. My round-2 handoff said the merge would \"change the SHA but not the audited tree content\" if it stayed off lib/sitemap \u2014 that was wrong; I asserted the check's scope without reading it. A merge that combines Sprint 2 (on main since 365da6f) with Sprint 3 (branched from 11bca26, before Sprint 2) necessarily has a different whole-repo tree than either parent, no matter how clean the merge. The refusal is the check working exactly as designed, and this re-audit is the documented recovery path (cmd_qa1 accepts dev_agreed_done). Pipeman also correctly carried the worktree's uncommitted state file (round-2 PASS, dev_agreed_done) into the merge rather than shipping a history that claimed dev_build.\nFOR WHOEVER OWNS THE TOOLING: this will recur on every Dev Team 2 worktree sprint whenever main moves in the meantime. It is not a bug \u2014 an unaudited merge is exactly what the hash exists to catch \u2014 but the recovery path could be cheaper: QA1 could audit the merge commit rather than the branch tip when a worktree sprint is ready to ship. Master Controller's call.\n\nWHAT WAS VERIFIED \u2014 the merge is the exact union of two already-audited trees, proven four ways\n1. git diff f6a3cfe 39da8b7 -- lib/sitemap test/sitemap test/fixtures/sitemap \u2192 EMPTY. Sprint 3's audited files are byte-identical to the round-2 PASS.\n2. git diff --name-status 365da6f 39da8b7, excluding Sprint 3's pure additions \u2192 only: the sprint-3 file moved 1-todo \u2192 2-in-progress (R100, content identical), registry.json, state/sprint-3.json (bookkeeping), package.json, package-lock.json.\n3. package.json: exactly one added line (\"fast-xml-parser\": \"^5.11.1\"). package-lock.json: eight node_modules entries ADDED (fast-xml-parser and its transitive deps, the same set as round 1), NOTHING removed \u2014 Sprint 2's dependency set is intact.\n4. git diff 365da6f 39da8b7 -- src/ views/ test/db test/lib test/middleware test/routes test/*.test.js bin/ public/ .env.example .gitignore \u2192 EMPTY. Sprint 2's shipped, audited files are untouched.\nSo: nothing in this commit is code QA1 has not already audited and passed. What is new is the COMBINATION, so the combination is what I tested:\n- Full suite on the merged tree, run by me: 239/239, lint exit 0.\n- Sitemap suite with dns.lookup/resolve4/resolve6/global fetch stubbed to throw: 121/121 \u2014 still fixture-only after the merge.\n- Boot check with Sprint 2's config surface (SESSION_SECRET, TEAM_PASSWORD_HASH, ENCRYPTION_KEY) and Sprint 3's module loaded in the same process: /healthz 200, discoverAndParseSitemap resolves to a function. The two sprints coexist.\n\nVERDICT RATIONALE\nContent already audited + combination verified working = PASS. No new findings. Round-2's non-blocking items (F connection-pinning for MC; G/H/I; J duplicate-ambiguous) carry forward unchanged and are not re-listed here \u2014 see round 2.\n\nNEXT\nThis PASS records the merge commit's tree hash. Dev Team 2 runs /sprint-dev-done 3 (from main now, where the state lives), then Pipeman ships 39da8b7. Per the sprint file, LiveQA's check is a boot + existing-screens smoke test; the engine's live verification is Sprint 5's."
+    },
+    {
+      "ts": "2026-09-15T19:38:33+00:00",
+      "actor": "dev-team",
+      "event": "dev_agreed_done",
+      "detail": ""
+    },
+    {
+      "ts": "2026-09-15T19:40:46+00:00",
+      "actor": "pipeman",
+      "event": "shipped",
+      "detail": "commit=39da8b7"
     }
   ]
 }
