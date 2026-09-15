@@ -48,6 +48,7 @@ function buildCtx(routes, overrides = {}) {
       consulted: [],
       skipped: [],
       ambiguous: [],
+      ambiguousRecorded: new Set(),
       urls: new Map(),
     },
     log: fetchImpl.log,
@@ -81,6 +82,49 @@ describe('crawlSitemapTree', () => {
       'https://example.test/sitemap-index-basic.xml',
     ]);
     assert.equal(ctx.truncated, false);
+  });
+
+  describe('sourceType tagging (sprint 4, requirement 5)', () => {
+    test('tags entries from a page-sitemap.xml child as "page" and from post-sitemap.xml as "post"', async () => {
+      const { ctx } = await runFromRoot('sitemap-index-basic.xml', ['page-sitemap.xml', 'post-sitemap.xml']);
+
+      assert.equal(ctx.urls.get('https://example.test/about/').sourceType, 'page');
+      assert.equal(ctx.urls.get('https://example.test/contact/').sourceType, 'page');
+      assert.equal(ctx.urls.get('https://example.test/blog/first-post/').sourceType, 'post');
+      assert.equal(ctx.urls.get('https://example.test/blog/second-post/').sourceType, 'post');
+    });
+
+    test('leaves sourceType undefined for a child whose filename names no recognizable content type', async () => {
+      const rootXml = `<?xml version="1.0"?><sitemapindex>
+        <sitemap><loc>https://example.test/gallery-sitemap.xml</loc></sitemap>
+      </sitemapindex>`;
+      const routes = { 'https://example.test/gallery-sitemap.xml': { body: loadFixture('gallery-sitemap.xml') } };
+      const { ctx } = buildCtx(routes);
+      const parsedDoc = parseSitemapXml(rootXml);
+      await crawlSitemapTree([{ url: 'https://example.test/root.xml', parsedDoc }], ctx);
+
+      assert.equal(ctx.urls.get('https://example.test/gallery/summer-2026/').sourceType, undefined);
+    });
+
+    test('a deeper level with no type of its own inherits its parent\'s sourceType', async () => {
+      // wp-sitemap-posts.xml (classified 'post') -> a further nested
+      // index whose OWN filename names nothing (numbered.xml) -> the
+      // leaf urlset. The type must survive the untyped middle hop.
+      const rootXml = `<?xml version="1.0"?><sitemapindex>
+        <sitemap><loc>https://example.test/wp-sitemap-posts.xml</loc></sitemap>
+      </sitemapindex>`;
+      const routes = {
+        'https://example.test/wp-sitemap-posts.xml': {
+          body: `<?xml version="1.0"?><sitemapindex><sitemap><loc>https://example.test/numbered.xml</loc></sitemap></sitemapindex>`,
+        },
+        'https://example.test/numbered.xml': { body: loadFixture('post-sitemap.xml') },
+      };
+      const { ctx } = buildCtx(routes);
+      const parsedDoc = parseSitemapXml(rootXml);
+      await crawlSitemapTree([{ url: 'https://example.test/root.xml', parsedDoc }], ctx);
+
+      assert.equal(ctx.urls.get('https://example.test/blog/first-post/').sourceType, 'post');
+    });
   });
 
   test('resolves a depth-3+ nested index chain fully', async () => {
@@ -277,6 +321,44 @@ describe('crawlSitemapTree', () => {
     const failed = ctx.skipped.find((s) => s.url.includes('post-sitemap'));
     assert.ok(failed);
     assert.ok(failed.reason.startsWith('parse-failed:'));
+  });
+
+  test('a child referenced by two different parents is recorded in ambiguous exactly once (sprint 4 carry-forward fix J)', async () => {
+    // QA1's Sprint 3 audit: the ambiguous-recording check ran once per
+    // PARENT that references a child, not once per child — the
+    // visited-set only stops it being FETCHED twice, it does nothing to
+    // the ambiguous push. Two index sitemaps (page-index-a, page-index-b
+    // — named with 'page' so THEY classify as 'include' and don't
+    // themselves confound this test) both reference the same
+    // unrecognized gallery-sitemap.xml.
+    const rootXml = `<?xml version="1.0"?><sitemapindex>
+      <sitemap><loc>https://example.test/page-index-a.xml</loc></sitemap>
+      <sitemap><loc>https://example.test/page-index-b.xml</loc></sitemap>
+    </sitemapindex>`;
+    const routes = {
+      'https://example.test/page-index-a.xml': {
+        body: `<?xml version="1.0"?><sitemapindex><sitemap><loc>https://example.test/gallery-sitemap.xml</loc></sitemap></sitemapindex>`,
+      },
+      'https://example.test/page-index-b.xml': {
+        body: `<?xml version="1.0"?><sitemapindex><sitemap><loc>https://example.test/gallery-sitemap.xml</loc></sitemap></sitemapindex>`,
+      },
+      'https://example.test/gallery-sitemap.xml': { body: loadFixture('gallery-sitemap.xml') },
+    };
+    const { ctx } = buildCtx(routes);
+    const parsedDoc = parseSitemapXml(rootXml);
+    await crawlSitemapTree([{ url: 'https://example.test/root.xml', parsedDoc }], ctx);
+
+    assert.equal(
+      ctx.ambiguous.length,
+      1,
+      'gallery-sitemap.xml, referenced by two parents, must appear exactly once, not twice'
+    );
+    assert.ok(ctx.ambiguous[0].url.includes('gallery-sitemap'));
+    assert.equal(
+      ctx.consulted.filter((u) => u.includes('gallery-sitemap')).length,
+      1,
+      'and was genuinely only fetched once'
+    );
   });
 
   test('sends Authorization on child-sitemap requests, not only the root', async () => {

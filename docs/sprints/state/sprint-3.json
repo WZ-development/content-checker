@@ -1,16 +1,16 @@
 {
   "id": 3,
   "title": "Sitemap discovery and recursive parsing engine",
-  "phase": "liveqa_live",
+  "phase": "complete",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "caa5049bbcdd249c5b1c53ab2489a5cc8906d9ef2a9cadfdbbc2f955e1f0a997",
   "qa1_audited_tree_hash": "2571fe78a455c89532483b6e745ba9be1c94fd1f",
   "last_shipped_commit": "39da8b7739952b8b2973728d4b96a051e50c306d",
-  "groundtruth_result": null,
+  "groundtruth_result": "PASS",
   "audit_rounds": 3,
-  "live_test_rounds": 0,
+  "live_test_rounds": 1,
   "started": "2026-09-14T22:59:38+00:00",
-  "completed": null,
+  "completed": "2026-09-15T19:47:46+00:00",
   "history": [
     {
       "ts": "2026-09-14T22:59:38+00:00",
@@ -53,6 +53,18 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=39da8b7"
+    },
+    {
+      "ts": "2026-09-15T19:45:41+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: LiveQA LIVE TEST \u2014 Sprint 3 (sitemap discovery and recursive parsing engine), round 1\nCommit tested: 39da8b7 (merge commit; working tree at HEAD 55301c8 is byte-identical for all\napp code \u2014 `git diff --name-only 39da8b7 HEAD` returns only docs/sprints/state/sprint-3.json)\nVerdict: PASS\n\nSCOPE \u2014 SMOKE TEST ONLY, by the sprint file's own terms (acceptance criteria line: \"LiveQA is\nnot a gate on this sprint's module directly \u2014 it has no UI \u2026 still gets a live smoke test\nthat the app boots and existing screens are unbroken\") and the user's instruction for this\nround. THE SITEMAP ENGINE ITSELF IS NOT VERIFIED HERE. Its live verification is Sprint 5's,\nagainst the real scan screen. Nothing in this verdict speaks to discovery, parsing,\npagination, robots handling, SSRF-at-request-time, or URL-set correctness.\nStanding caveats: local instance at BASE_PATH=/content-check, not a deployment (Sprint 6);\nthrowaway secrets; data/ and .env created by me and deleted at cleanup; screenshots\nunavailable in this harness (injection timeouts), evidence is DOM text + raw HTTP + SQLite.\n\nCHANGE SURFACE (what the smoke test needed to cover)\n  git diff --name-only 365da6f(Sprint 2 close) 39da8b7, excluding docs/ and test/:\n    lib/sitemap/{classify,concurrencyLimit,constants,crawl,discovery,errors,httpClient,\n    index,robots,ssrf,xml}.js, package.json, package-lock.json.\n  Sprint 1/2 surface (src/app.js, src/routes, src/middleware, views, src/db, crypto,\n  sessionCookie, urlValidation, ipRangeCheck): UNTOUCHED. Ownership line held.\n  One new runtime dependency: fast-xml-parser ^5.11.1. That is the realistic boot risk.\n\nBOOT\n  npm ci from the shipped lockfile: exit 0.\n  require('./lib/sitemap') under node: loads, exports discoverAndParseSitemap, errors, DEFAULTS.\n  node src/server.js: \"[content-checker] listening on port 3000, mounted at /content-check\".\n  Server log across the whole session: 0 error/unhandled/warn lines.\n\nSPRINT 1 SCREENS (curl + browser)\n  unauth GET /            -> 302 /content-check/login\n  wrong password          -> 401 \"Incorrect password. Please try again.\"\n  correct password        -> 302 /content-check/ ; landing \"You're authenticated. Manage projects.\"\n                             Cache-Control: no-store, no-cache, must-revalidate\n  logout                  -> 302 login; Set-Cookie: content-checker.sid=; Path=/content-check; Expires=1970\n  replay dead cookie      -> 302 login\n  Back after logout (browser, strict gate: server confirmed unauthenticated before Back)\n                          -> /content-check/login, no project data, no credential indicator.\n                             Chrome took the back_forward path (no bfcache restore); handler\n                             present in HTML on every screen as at Sprint 2 close.\n\nSPRINT 2 SCREENS (curl + browser)\n  /projects empty         -> 200 \"No projects yet.\"\n  /projects/new           -> labels Project name / Live URL / Staging URL / Username / Password; _csrf present\n  create, private IP      -> 400 \"This URL points to a private, loopback, or link-local address, which this tool cannot fetch.\"\n  create, valid + pw      -> 302 list; row \"Browser Smoke | https://bs.example.com |\n                             https://staging.bs.example.com | Password stored\"; trailing slash\n                             stripped; plaintext \"BrowserSmoke-1\" nowhere in the HTML\n  edit                    -> prefill name/urls/username correct, password field \"\" with no\n                             value attribute, \"A password is currently stored.\", clear control\n                             present, Cache-Control no-store, bfcache handler present\n  edit blank keeps        -> POST /projects/:id with blank password: 302; list \"Smoke Co 2 |\n                             Password stored\"; stored column decrypts to \"SmokePw-1\" (original)\n  delete confirm          -> \"Delete Smoke Co and its stored credentials? This cannot be undone.\"\n                             GET does not delete; POST -> 302; list \"No projects yet.\"\n  CSRF missing            -> 403 text/html\n  console                 -> 0 errors across every screen and the Back cycle\n\nONE TEST ERROR OF MINE, NOT AN APP DEFECT, recorded so nobody chases it: my first curl edit\nposted to /projects/:id/edit and got 404. The update form actually posts to /projects/:id\n(read from the rendered form action); the app correctly 404s the path I invented. Re-run\nagainst the real target passed as above. In Sprint 2 the browser submitted the real form so\nthe path never had to be typed.\n\nRECOMMENDATION\nShip-ready for what this sprint asked LiveQA to check: the app boots from a clean install\nwith the new dependency, and every Sprint 1 and Sprint 2 screen and header behaves exactly\nas at Sprint 2 close. The engine is unverified by LiveQA by design and remains Sprint 5's;\nthat sprint should plan for a real live run against a real sitemap, not inherit this PASS.\n\nSprint is ready to close once the user says so. That call is the user's, not mine."
+    },
+    {
+      "ts": "2026-09-15T19:47:46+00:00",
+      "actor": "dev-team",
+      "event": "sprint_closed",
+      "detail": "user_said=/sprint-complete 3"
     }
   ]
 }

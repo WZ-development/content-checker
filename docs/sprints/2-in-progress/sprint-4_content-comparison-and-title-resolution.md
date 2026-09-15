@@ -20,6 +20,13 @@ Titles are the second gap. WordPress sitemaps carry no titles — verified 2026-
 9. Each result item records whether its title was fetched or slug-derived, so the UI can distinguish a real title from a guess.
 10. The comparison result carries the completeness signals from Sprint 3 (truncated flag, ambiguous or skipped sitemaps) through to its own output, so Sprint 5 can warn that a diff may be incomplete. A truncated scan must never present as a clean, complete result.
 11. Unit tests cover: normalization across host, scheme, `www`, case, trailing-slash, and fragment variants; all three classification groups; empty sets on either side; slug derivation including percent-encoded and underscore cases; title-suffix stripping; and title-fetch failure falling back to slug without dropping the item.
+12. **Reuse Sprint 3's HTTP layer; do not build a second one.** The title fetcher takes an injected fetch implementation exactly as Sprint 3's crawler does, and takes credentials as a plaintext `{username, password}` object supplied by the caller. It does not touch the store, does not call the decrypt helper itself, and does not construct its own agent or client. QA1 ruled on this boundary in Sprint 3 ("the caller decrypts and passes the result in") and Sprint 5 will be audited against it — a second HTTP client here would mean the connection-pinning fix scoped for Sprint 5 has to be applied twice.
+13. **Sprint 3 carry-forward — four small fixes in `lib/sitemap/`**, all specified by QA1 in its Sprint 3 audit and left non-blocking there. This sprint is the next touch of that module and these land here, before Sprint 5 renders the output they affect:
+    - **(J)** `result.ambiguous` can list the same child sitemap twice when two parents reference it. Deduplicate — a Set, or record on first consult only. Without this, Sprint 5 shows the same "check this" warning twice.
+    - **(H)** A same-host `https→http` redirect still forwards the `Authorization` header. Compare **origin** (scheme + host + port), not hostname, before forwarding credentials. This is a credential-downgrade leak and it is the most important of the four.
+    - **(G)** `classify.js` matches the exclusion list by prefix. Match by exact token, so a hypothetical `products-guide-sitemap.xml` is not silently excluded by `product-`.
+    - **(I)** A `manualSitemapUrl` containing userinfo (`https://user:pass@host/…`) is echoed into error text and the attempts log. Strip userinfo before logging or rendering.
+14. Tests for each of the four carry-forward items: a duplicate-reference fixture asserting `ambiguous` has one entry; an `https→http` same-host redirect asserting no `Authorization` header on the second hop; an exact-token classification case; and a userinfo URL asserting it does not appear in the error message or attempts log.
 
 ### Acceptance Criteria
 - QA1 confirms `https://clientdomain.com/About/`, `http://www.clientdomain.com/about`, and `https://staging.clientdomain.com/about/#team` all normalize to the same key — the central correctness test of this sprint.
@@ -31,6 +38,8 @@ Titles are the second gap. WordPress sitemaps carry no titles — verified 2026-
 - QA1 confirms site-name suffix stripping works for both ` - ` and ` | ` separators and does not mangle a title that legitimately contains those characters mid-sentence.
 - QA1 confirms each item exposes whether its title was fetched or derived, and that the truncated/ambiguous signals from Sprint 3 survive into the comparison output.
 - QA1 confirms Basic Auth headers are sent on staging-side title fetches.
+- QA1 confirms the title fetcher accepts an injected fetch and a plaintext credential object, constructs no HTTP client of its own, and imports nothing from the store or decrypt helper.
+- QA1 confirms all four Sprint 3 carry-forward fixes (G, H, I, J) landed with the tests in requirement 14, and specifically that the `https→http` redirect case sends no `Authorization` header on the downgraded hop — asserting on captured outbound headers.
 - QA1 runs `npm test` and `npm run lint`; both pass.
 - LiveQA's live verification of this logic happens in Sprint 5 against the real results screen; this sprint ships with a live smoke test that the app boots and prior screens are unbroken.
 
@@ -43,11 +52,16 @@ Titles are the second gap. WordPress sitemaps carry no titles — verified 2026-
 
 ### Dependencies
 - Blocks: Sprint 5 (renders this module's output).
-- Blocked by: Sprint 3 (URL sets and their classification), Sprint 2 (decrypt helper for staging title fetches).
+- Blocked by: Sprints 1–3, all complete on `main`.
 - External: None. All behaviour is testable against fixtures.
+
+### Team Assignments
+- **Dev Team 1, alone, on `main`.** From Sprint 4 onward this project runs one dev team, sequentially. No worktree, no parallel sprint, no Dev Team 2. The `devteam2/sprint-3` worktree at `../content-checker-devteam2-sprint-3` is finished and should be removed by Pipeman (`git worktree remove`), not reused.
+- Single-team means this sprint may touch `lib/sitemap/` for the carry-forward fixes without any ownership-boundary concern. That boundary existed to keep two teams apart; it no longer applies.
 
 ### Risks & Mitigations
 - **Normalization that is nearly right** — trailing slash handled, `www` missed — producing a diff full of false positives that trains developers to distrust the tool. Mitigated by requirement 2 enumerating every transform and by the multi-variant acceptance test.
 - **Rename detection creeping in** as a "helpful" improvement, which can hide a real deletion behind a guessed pairing. Explicitly out of scope with the reasoning recorded.
 - **Title fetching quietly expanded to the full URL set** because it is simpler to write. Mitigated by an acceptance criterion that counts outbound requests rather than trusting the code path.
+- **The carry-forward fixes get skipped as "not this sprint's feature."** They are numbered requirements with their own tests and acceptance criteria precisely so they cannot be deferred a second time. Item H in particular is a credential leak and does not wait for a cleanup sprint that may never be scheduled.
 - **A truncated Sprint 3 result presented as complete**, which reintroduces the silent-data-loss failure one layer up. Requirement 10 forces the signal through; Sprint 5 must display it.

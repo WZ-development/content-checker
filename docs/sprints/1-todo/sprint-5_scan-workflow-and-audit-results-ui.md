@@ -22,6 +22,9 @@ A deliberate change from PRD §4.5, flagged when this epic was planned. The PRD 
 11. A failure on one side still renders whatever the other side returned, clearly labelled as a partial result. A staging site that is temporarily down should not discard a successful live scan.
 12. Server-rendered, no bundler, per Sprint 1. Progressive enhancement only.
 13. Tests cover: the route requires authentication, results render for all three group states, the zero-difference state, the truncation warning, the 401 staging message, and the partial-result path.
+14. **Construct the outbound HTTP client once, here, with connection pinning.** QA1 flagged during Sprint 3 (item F, addressed to Master Controller) that the SSRF check resolves DNS, and then `fetch` resolves DNS again on its own — a time-of-check/time-of-use gap where a hostname can pass the check and then resolve to a private address for the real connection. Requirement 10 of Sprint 3 was met as written; this is the real fix. This sprint is where the concrete fetch implementation is built and injected into both the crawler (Sprint 3) and the title fetcher (Sprint 4), so it is built once: an agent whose DNS lookup is the vetted one (undici `Agent` with a custom `lookup`, or connect-by-IP with an explicit `Host` header — the how is Dev Team's). Both consumers receive the same injected instance. No module constructs its own.
+15. **Every screen this sprint adds is authenticated and must carry the post-logout protection established in Sprints 1–2** — `Cache-Control: no-store` *and* the bfcache `pageshow`/`persisted` handling. Sprint 2's requirement 11 called for that handling to live in a shared layout; if it does, these screens inherit it and this requirement is a verification. If it does not, moving it into a shared layout is in scope here rather than copying it a third time. Scan results are authenticated content: which client sites the agency works on, and what they have published, should not survive logout on a shared machine.
+16. **The credential boundary holds at the route.** The scan route calls the store's decrypt helper and passes a plaintext `{username, password}` object into the engine. Nothing below the route layer touches the store or decrypts anything. QA1 recorded this as the design ruling in Sprint 3 and stated it would audit Sprint 5 against it.
 
 ### Acceptance Criteria
 - QA1 confirms the scan route is authenticated and uses the `BASE_PATH` helper for every link, form action, and asset.
@@ -33,8 +36,11 @@ A deliberate change from PRD §4.5, flagged when this epic was planned. The PRD 
 - QA1 confirms a truncated result renders the incompleteness warning **and** the results together, asserting on both being present — a truncated scan rendering as clean is a sprint failure.
 - QA1 confirms a 401 on the staging side produces the credentials-specific message and a working link to that project's edit screen, asserting on the message text and the link target.
 - QA1 confirms a one-sided failure still renders the successful side, labelled partial.
+- QA1 confirms exactly one outbound fetch implementation is constructed, that its DNS resolution is the vetted one (the same lookup the SSRF check uses, or connect-by-IP), and that both the crawler and the title fetcher receive that same instance by injection — asserting on the wiring, not on a comment claiming it.
+- QA1 confirms every new authenticated response carries `Cache-Control: no-store` and that the bfcache handler is present in the rendered HTML of each new screen — via a shared layout, not per-page copies.
+- QA1 confirms decryption happens in the route and nowhere below it.
 - QA1 runs `npm test` and `npm run lint`; both pass.
-- **LiveQA runs the full workflow live**, and this is the sprint where the engine gets its real-world test: log in, create a project against a genuine WordPress site, run a scan, and confirm results render with working links that open the correct pages. Then run a scan against a site whose staging URL requires Basic Auth with no credentials saved, and confirm the 401 message and its edit link appear. Then a project whose staging URL has no discoverable sitemap, and confirm the manual-entry prompt appears and a pasted sitemap URL completes the scan. Confirm the double-click guard by clicking the trigger twice quickly.
+- **LiveQA runs the full workflow live**, and this is the sprint where the engine gets its real-world test: log in, create a project against a genuine WordPress site, run a scan, and confirm results render with working links that open the correct pages. Then run a scan against a site whose staging URL requires Basic Auth with no credentials saved, and confirm the 401 message and its edit link appear. Then a project whose staging URL has no discoverable sitemap, and confirm the manual-entry prompt appears and a pasted sitemap URL completes the scan. Confirm the double-click guard by clicking the trigger twice quickly. Then, on the results screen with a real scan displayed, log out and press Back — the results must not render from cache, same protocol and same `pageshow.persisted` verification as Sprint 1 round 3.
 
 ### Out of Scope
 - Automated transfer of missing content — V2 per PRD §6.1. This screen produces a list a developer acts on manually, which PRD §4.5 defines as the V1 workflow.
@@ -44,12 +50,16 @@ A deliberate change from PRD §4.5, flagged when this epic was planned. The PRD 
 - Deploying to `tools.wordzite.com` — a separate sprint once the host exists.
 
 ### Dependencies
-- Blocks: production deployment (the last V1 sprint, not yet defined).
-- Blocked by: Sprint 2 (project store), Sprint 4 (comparison output), and transitively Sprints 1 and 3.
-- External: LiveQA needs a real WordPress site to scan, plus one Basic Auth-protected staging site to verify the 401 path. Identify both before this sprint reaches its live gate.
+- Blocks: Sprint 6 (production deployment).
+- Blocked by: Sprint 4. Sprints 1–3 are complete on `main`.
+- External: **LiveQA needs a real WordPress site to scan, plus one Basic Auth-protected staging site to verify the 401 path.** Your own `www.wordzite.com` / `staging1.wordzite.com` pair is the obvious candidate. Have both URLs and the staging credentials ready before this sprint reaches its live gate — the 401 path is the most common real-world failure and cannot be tested without them.
+
+### Team Assignments
+- **Dev Team 1, alone, on `main`.** Sequential after Sprint 4. No worktree, no Dev Team 2. This sprint touches routes, views, and the wiring of `lib/sitemap/` and the comparison module — with one team there is no ownership boundary to respect, only the requirements.
 
 ### Risks & Mitigations
 - **This is the first sprint where the engine meets reality**, and real WordPress sites will break assumptions the fixtures did not. That is expected and is exactly why LiveQA's criteria here are the most detailed in the epic. Budget for a fix loop rather than treating one as a failure.
 - **The incompleteness warning gets built as a small grey note** and is missed on the screen where it matters most. Mitigated by requiring QA1 to assert warning and results render together, and by keeping its prominence an explicit acceptance criterion.
 - **Green/red weighting reverting to the PRD's equal treatment** because the PRD says so and the reasoning lives only here. The deviation and its justification are recorded in Context so QA1 audits against this file, not the PRD.
+- **Connection pinning treated as optional hardening and dropped when the sprint runs long.** It is a numbered requirement with an acceptance criterion that checks the wiring. It closes a gap QA1 rated MEDIUM and explicitly assigned to this sprint; it is not polish.
 - **Long scans on large sites feeling broken.** Mitigated by requirement 3's progress state and requirement 6's count summary. If real use shows scans routinely exceeding the budget, that is a follow-up sprint, not scope to absorb here.

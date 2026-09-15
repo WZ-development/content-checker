@@ -149,6 +149,41 @@ describe('createGuardedFetch', () => {
       assert.ok(log[1].headers.Authorization, 'same-host redirect should carry auth too');
     });
 
+    test('drops Authorization on a same-host https->http redirect (sprint 4 carry-forward fix H)', async () => {
+      // QA1's Sprint 3 audit: comparing only .hostname let a same-host
+      // scheme downgrade still forward Authorization — the credential
+      // then travels in cleartext even though the "same host" check
+      // passed. This is the case requirement 13/14 specifically calls
+      // out as "the most important of the four."
+      const { guardedFetch, log } = makeGuardedFetch(
+        {
+          'https://good.test/old.xml': { status: 302, headers: { location: 'http://good.test/new.xml' } },
+          'http://good.test/new.xml': { body: 'ok' },
+        },
+        { auth: { username: 'dev', password: 'pw' } }
+      );
+      await guardedFetch('https://good.test/old.xml');
+      assert.equal(log.length, 2);
+      assert.ok(log[0].headers.Authorization, 'first request (https) should carry auth');
+      assert.equal(
+        log[1].headers.Authorization,
+        undefined,
+        'the downgraded http hop must NOT carry auth, even though the host is identical'
+      );
+    });
+
+    test('drops Authorization on a same-host http->https redirect too (port/scheme change either direction)', async () => {
+      const { guardedFetch, log } = makeGuardedFetch(
+        {
+          'http://good.test/old.xml': { status: 302, headers: { location: 'https://good.test:8443/new.xml' } },
+          'https://good.test:8443/new.xml': { body: 'ok' },
+        },
+        { auth: { username: 'dev', password: 'pw' } }
+      );
+      await guardedFetch('http://good.test/old.xml');
+      assert.equal(log[1].headers.Authorization, undefined, 'a port change must also read as a different origin');
+    });
+
     test('drops Authorization on a redirect to a DIFFERENT host', async () => {
       const { guardedFetch, log } = makeGuardedFetch(
         {

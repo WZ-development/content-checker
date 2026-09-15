@@ -124,6 +124,61 @@ describe('discoverAndParseSitemap (end to end, fixtures only, no live network)',
     await assert.rejects(() => discoverAndParseSitemap({}), TypeError);
   });
 
+  describe('userinfo redaction (sprint 4 carry-forward fix I)', () => {
+    test('a manualSitemapUrl containing userinfo never appears in the thrown error', async () => {
+      const SECRET = 'sekrit-password';
+      // Mirrors real fetch()'s own behavior for a URL with embedded
+      // credentials (verified against Node 24's global fetch, which
+      // throws before making any request): a TypeError whose message
+      // embeds the credential URL — the actual leak path this fix
+      // closes runs through exactly this message text, not just
+      // through the `url` argument httpClient.js passes around.
+      const fetchImpl = async (url) => {
+        throw new TypeError(`Request cannot be constructed from a URL that includes credentials: ${url}`);
+      };
+
+      await assert.rejects(
+        () =>
+          discoverAndParseSitemap({
+            manualSitemapUrl: `https://user:${SECRET}@example.test/sitemap.xml`,
+            fetchImpl,
+            dnsLookup: DNS,
+          }),
+        (err) => {
+          assert.ok(!err.message.includes(SECRET), `error.message leaked the credential: ${err.message}`);
+          assert.ok(!String(err.url).includes(SECRET), `error.url leaked the credential: ${err.url}`);
+          assert.ok(
+            !(err.cause && String(err.cause.message).includes(SECRET)),
+            `error.cause leaked the credential: ${err.cause && err.cause.message}`
+          );
+          return true;
+        }
+      );
+    });
+
+    test('a baseUrl containing userinfo never appears in the discovery attempts log', async () => {
+      const SECRET = 'sekrit-password';
+      const fetchImpl = createFakeFetch({}); // no routes configured — every discovery attempt fails
+
+      await assert.rejects(
+        () =>
+          discoverAndParseSitemap({
+            baseUrl: `https://user:${SECRET}@example.test/`,
+            fetchImpl,
+            dnsLookup: DNS,
+          }),
+        (err) => {
+          assert.ok(err instanceof errors.SitemapDiscoveryFailedError);
+          assert.ok(err.attempts.length > 0, 'expected at least one recorded attempt');
+          for (const attempt of err.attempts) {
+            assert.ok(!attempt.url.includes(SECRET), `attempts log leaked the credential: ${attempt.url}`);
+          }
+          return true;
+        }
+      );
+    });
+  });
+
   test('end to end: a flat index that would blow a short budget still returns truncated:true with partial, fully-recorded results (QA1 round 1, finding A)', async () => {
     const childNames = ['sitemap-page-1', 'sitemap-page-2', 'sitemap-page-3', 'sitemap-page-4', 'sitemap-page-5', 'sitemap-page-6'];
     const routes = {};
