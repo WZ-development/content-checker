@@ -69,7 +69,7 @@ describe('parseSitemapXml', () => {
     });
   });
 
-  test('treats an HTML content-type as non-XML even if the body happens to start with "<"', () => {
+  test('treats an unparseable-shaped body as non-XML even under an HTML content-type', () => {
     assert.throws(
       () => parseSitemapXml('<div>oops</div>', { contentType: 'text/html; charset=utf-8' }),
       (err) => {
@@ -77,6 +77,34 @@ describe('parseSitemapXml', () => {
         return true;
       }
     );
+  });
+
+  test('a VALID sitemap body is accepted regardless of a misleading content-type header (QA1 round 1, finding E)', () => {
+    // A misconfigured server can send a legitimate urlset with the wrong
+    // Content-Type. Content-type must never veto a body that actually
+    // parses — doing so drops a good sitemap, the highest-severity
+    // failure direction this project defends against.
+    const result = parseSitemapXml(loadFixture('empty-urlset.xml'), { contentType: 'text/html; charset=UTF-8' });
+    assert.equal(result.type, 'urlset');
+  });
+
+  test('uses content-type only as a tiebreaker when the body fails to validate at all', () => {
+    // Truncated XML that ALSO claims an HTML content-type is classified
+    // as non-XML (more likely a mislabeled HTML error page) rather than
+    // malformed XML.
+    assert.throws(
+      () => parseSitemapXml(loadFixture('malformed.xml'), { contentType: 'text/html; charset=UTF-8' }),
+      (err) => {
+        assert.ok(err instanceof NonXmlResponseError);
+        return true;
+      }
+    );
+    // The SAME broken body, without the HTML content-type, is still
+    // reported as malformed XML, not non-XML.
+    assert.throws(() => parseSitemapXml(loadFixture('malformed.xml')), (err) => {
+      assert.ok(err instanceof MalformedXmlError);
+      return true;
+    });
   });
 
   test('strips a leading BOM before parsing', () => {

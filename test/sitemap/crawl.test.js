@@ -13,6 +13,18 @@ const DNS = createFakeDnsLookup({ 'example.test': '93.184.216.34' });
 
 function buildCtx(routes, overrides = {}) {
   const fetchImpl = createFakeFetch(routes);
+  const startedAt = Date.now();
+  const budgetMs = overrides.budgetMs ?? 90000;
+
+  // Mirrors index.js: a budget-wide AbortSignal that guardedFetch
+  // observes, so a fetch already admitted/queued is still cut off when
+  // the budget expires mid-flight, not just checked at admission time.
+  // .unref() so a test's default 90s budget timer never holds the test
+  // runner process open after the suite itself has finished.
+  const budgetController = new AbortController();
+  const budgetTimer = setTimeout(() => budgetController.abort(), budgetMs);
+  budgetTimer.unref();
+
   const guardedFetch = createGuardedFetch({
     fetchImpl,
     dnsLookup: DNS,
@@ -20,15 +32,16 @@ function buildCtx(routes, overrides = {}) {
     auth: overrides.auth,
     userAgent: 'TestBot/1.0',
     maxRedirects: 5,
+    budgetSignal: budgetController.signal,
   });
   return {
     ctx: {
       guardedFetch,
       limit: createLimiter(overrides.concurrency || 5),
-      budgetMs: overrides.budgetMs ?? 90000,
+      budgetMs,
       maxChildren: overrides.maxChildren ?? 50,
       maxSafetyDepth: overrides.maxSafetyDepth ?? 20,
-      startedAt: Date.now(),
+      startedAt,
       fetchedCount: 0,
       truncated: false,
       visited: new Set(),
@@ -149,11 +162,22 @@ describe('crawlSitemapTree', () => {
     const { ctx } = await runFromRoot(
       'techcrunch-style-index.xml',
       ['sitemap-page-1.xml', 'sitemap-page-2.xml', 'sitemap-page-3.xml', 'sitemap-page-4.xml', 'sitemap-page-5.xml', 'sitemap-page-6.xml'],
-      { maxChildren: 4 } // root + 3 children before the cap trips
+      { maxChildren: 4 } // the pre-parsed root does not count — exactly 4 CHILDREN get fetched (finding B)
     );
     assert.equal(ctx.truncated, true);
-    assert.ok(ctx.urls.size < 12, 'should not have collected every URL');
-    assert.ok(ctx.urls.size > 0, 'should still return whatever it gathered');
+    assert.equal(ctx.urls.size, 8, 'exactly 4 children x 2 URLs each — root never counted against the cap');
+    const truncatedSkips = ctx.skipped.filter((s) => s.reason === 'truncated:cap');
+    assert.equal(truncatedSkips.length, 2, 'the 2 children that never got a slot must be recorded, not silently dropped');
+  });
+
+  test('a cap of 1 fetches exactly one CHILD sitemap, not zero (QA1 round 1, finding B)', async () => {
+    const { ctx } = await runFromRoot('sitemap-index-basic.xml', ['page-sitemap.xml', 'post-sitemap.xml'], {
+      maxChildren: 1,
+    });
+    assert.equal(ctx.truncated, true);
+    assert.equal(ctx.consulted.length, 2, 'the pre-parsed root + exactly one child'); // root + 1 child
+    assert.equal(ctx.urls.size, 2, 'the one fetched child contributed its URLs');
+    assert.equal(ctx.skipped.filter((s) => s.reason === 'truncated:cap').length, 1);
   });
 
   test('sets truncated:true when the overall time budget is exceeded', async () => {
@@ -172,6 +196,59 @@ describe('crawlSitemapTree', () => {
     // The budget should have tripped before the final urlset was ever
     // fetched — proving this is an honest early stop, not a fluke.
     assert.ok(!log.some((entry) => entry.url.includes('nested-post-sitemap')));
+  });
+
+  test('sets truncated:true for a FLAT index too, not only a sequential chain (QA1 round 1, finding A)', async () => {
+    // QA1's exact demonstration: a flat index's siblings are all admitted
+    // in the same tick, so an admission-time-only budget check never
+    // trips once they're queued — regardless of how long the queue
+    // actually takes to drain under a low concurrency limit.
+    const routes = {};
+    const childNames = [];
+    for (let i = 1; i <= 10; i += 1) {
+      const name = `sitemap-page-${((i - 1) % 6) + 1}.xml`; // reuse the 6 existing fixtures, repeated
+      childNames.push(`child${i}`);
+      routes[`https://example.test/child${i}.xml`] = { body: loadFixture(name), delayMs: 30 };
+    }
+    const rootXml = `<?xml version="1.0"?><sitemapindex>${childNames
+      .map((n) => `<sitemap><loc>https://example.test/${n}.xml</loc></sitemap>`)
+      .join('')}</sitemapindex>`;
+
+    const { ctx } = buildCtx(routes, { budgetMs: 50, concurrency: 1 });
+    const parsedDoc = parseSitemapXml(rootXml);
+
+    const start = Date.now();
+    await crawlSitemapTree([{ url: 'https://example.test/root.xml', parsedDoc }], ctx);
+    const elapsed = Date.now() - start;
+
+    assert.equal(ctx.truncated, true, `budget (50ms) must trip well before all 10 x 30ms children finish (took ${elapsed}ms)`);
+    assert.ok(ctx.consulted.length < 10, `expected fewer than 10 children consulted, got ${ctx.consulted.length}`);
+    assert.ok(
+      ctx.skipped.some((s) => s.reason === 'truncated:budget'),
+      'children cut off by the budget must be recorded in skipped, not silently dropped'
+    );
+  });
+
+  test('a child classified ambiguous is recorded in skipped, not ambiguous, when it is cut off by the cap before being fetched (QA1 round 1, finding C)', async () => {
+    // gallery-sitemap.xml classifies as ambiguous. With a cap that lets
+    // the FIRST child through but not the second, gallery-sitemap (2nd
+    // in document order) must never be fetched, and must NOT appear in
+    // `ambiguous` implying "included, check it" when it was not
+    // included at all.
+    const routes = fixtureRoutes(['page-sitemap.xml']); // gallery-sitemap.xml deliberately has no route — it must never be fetched
+    const rootXml = `<?xml version="1.0"?><sitemapindex>
+      <sitemap><loc>https://example.test/page-sitemap.xml</loc></sitemap>
+      <sitemap><loc>https://example.test/gallery-sitemap.xml</loc></sitemap>
+    </sitemapindex>`;
+    const { ctx } = buildCtx(routes, { maxChildren: 1 });
+    const parsedDoc = parseSitemapXml(rootXml);
+    await crawlSitemapTree([{ url: 'https://example.test/root.xml', parsedDoc }], ctx);
+
+    assert.equal(ctx.truncated, true);
+    assert.deepEqual(ctx.ambiguous, [], 'gallery-sitemap.xml was never fetched — it must not appear in ambiguous');
+    const truncatedGallery = ctx.skipped.find((s) => s.url.includes('gallery-sitemap'));
+    assert.ok(truncatedGallery, 'the truncated child must still be recorded, in skipped');
+    assert.equal(truncatedGallery.reason, 'truncated:cap');
   });
 
   test('a child that fails to fetch (e.g. 404) is recorded in skipped and does not abort the rest of the crawl', async () => {

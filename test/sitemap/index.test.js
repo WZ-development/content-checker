@@ -123,4 +123,32 @@ describe('discoverAndParseSitemap (end to end, fixtures only, no live network)',
   test('throws a TypeError when neither baseUrl nor manualSitemapUrl is given', async () => {
     await assert.rejects(() => discoverAndParseSitemap({}), TypeError);
   });
+
+  test('end to end: a flat index that would blow a short budget still returns truncated:true with partial, fully-recorded results (QA1 round 1, finding A)', async () => {
+    const childNames = ['sitemap-page-1', 'sitemap-page-2', 'sitemap-page-3', 'sitemap-page-4', 'sitemap-page-5', 'sitemap-page-6'];
+    const routes = {};
+    for (const name of childNames) {
+      routes[`https://example.test/${name}.xml`] = { body: loadFixture(`${name}.xml`), delayMs: 25 };
+    }
+    const rootXml = `<?xml version="1.0"?><sitemapindex>${childNames
+      .map((n) => `<sitemap><loc>https://example.test/${n}.xml</loc></sitemap>`)
+      .join('')}</sitemapindex>`;
+    routes['https://example.test/sitemap.xml'] = { body: rootXml };
+
+    const fetchImpl = createFakeFetch(routes);
+    const result = await discoverAndParseSitemap({
+      manualSitemapUrl: 'https://example.test/sitemap.xml',
+      fetchImpl,
+      dnsLookup: DNS,
+      budgetMs: 40,
+      concurrency: 1,
+    });
+
+    assert.equal(result.truncated, true, 'a 40ms budget against 6x25ms sequential children must trip');
+    assert.ok(result.urls.length < 12, `expected fewer than 12 URLs, got ${result.urls.length}`);
+    assert.ok(
+      result.skipped.some((s) => s.reason === 'truncated:budget'),
+      'every child cut off by the budget must be recorded in skipped'
+    );
+  });
 });

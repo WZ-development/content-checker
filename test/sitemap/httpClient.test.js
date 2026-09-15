@@ -190,4 +190,29 @@ describe('createGuardedFetch', () => {
     const { guardedFetch } = makeGuardedFetch({ 'https://evil.test/x.xml': { body: 'nope' } });
     await assert.rejects(() => guardedFetch('https://evil.test/x.xml'), SsrfBlockedError);
   });
+
+  describe('bracketed IPv6 literals, end to end (QA1 round 1, finding D)', () => {
+    test('blocks a bracketed loopback literal, dotted-quad-mapped spelling', async () => {
+      const { guardedFetch } = makeGuardedFetch({ 'http://[::ffff:127.0.0.1]/x.xml': { body: 'nope' } });
+      await assert.rejects(() => guardedFetch('http://[::ffff:127.0.0.1]/x.xml'), SsrfBlockedError);
+    });
+
+    test('blocks a bracketed loopback literal, hex-group-mapped spelling', async () => {
+      const { guardedFetch } = makeGuardedFetch({ 'http://[::ffff:7f00:1]/x.xml': { body: 'nope' } });
+      await assert.rejects(() => guardedFetch('http://[::ffff:7f00:1]/x.xml'), SsrfBlockedError);
+    });
+
+    test('blocks a bare bracketed ::1 literal', async () => {
+      const { guardedFetch } = makeGuardedFetch({ 'http://[::1]/x.xml': { body: 'nope' } });
+      await assert.rejects(() => guardedFetch('http://[::1]/x.xml'), SsrfBlockedError);
+    });
+
+    test('allows a bracketed PUBLIC IPv6 literal through (must not be misreported as DNS_ERROR)', async () => {
+      const { guardedFetch } = makeGuardedFetch({
+        'http://[2606:2800:220:1:248:1893:25c8:1946]/x.xml': { body: '<urlset></urlset>' },
+      });
+      const res = await guardedFetch('http://[2606:2800:220:1:248:1893:25c8:1946]/x.xml');
+      assert.equal(res.body, '<urlset></urlset>');
+    });
+  });
 });
