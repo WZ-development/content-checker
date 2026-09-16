@@ -6,6 +6,7 @@ const STAGING_AUTH_MESSAGE =
   'This staging site requires HTTP Basic Auth (.htaccess) credentials to access its sitemap. Add them on the project’s edit screen.';
 
 const AUTH_CODES = new Set(['HTTP_401', 'HTTP_403']);
+const DNS_ERROR_CODE = 'DNS_ERROR';
 
 /**
  * QA1's Sprint 5 audit, finding B: automatic discovery (robots.txt, then
@@ -23,9 +24,49 @@ const AUTH_CODES = new Set(['HTTP_401', 'HTTP_403']);
  * records it from each attempt's own err.code). This just reads it
  * back out, rather than discarding it as the generic "couldn't
  * discover" case did before this fix.
+ *
+ * Returns the specific auth-coded attempt found (not just a boolean) so
+ * the caller can tell 401 apart from 403 — see describeLiveAuthMessage.
  */
-function hasAuthAttempt(discoveryFailedError) {
-  return (discoveryFailedError.attempts || []).some((attempt) => AUTH_CODES.has(attempt.error));
+function findAuthAttempt(discoveryFailedError) {
+  return (discoveryFailedError.attempts || []).find((attempt) => AUTH_CODES.has(attempt.error));
+}
+
+/**
+ * LiveQA's Sprint 5 round-1 live test, issue 1: the SAME shape as
+ * finding B, for a different attempt reason. Every discovery attempt is
+ * against a subpath of the SAME hostname, so if that host genuinely
+ * doesn't resolve, EVERY attempt fails with DNS_ERROR uniformly — there
+ * is no mixed-result case the way a partially-protected site can mix
+ * 401s with 404s. Checking that ALL attempts share the code (not just
+ * "any", the way the auth check works) is what LiveQA's own report asked
+ * for: "if the attempts all failed with DNS resolution... surface that
+ * type's message". Demonstrated live: the exact same unresolvable
+ * staging host produced the correct DNS message on the manual-URL path
+ * and the generic "paste a sitemap URL" text on the discovery path —
+ * sending a developer to paste a URL on a host that will never resolve.
+ */
+function allAttemptsFailedWithCode(discoveryFailedError, code) {
+  const attempts = discoveryFailedError.attempts || [];
+  return attempts.length > 0 && attempts.every((attempt) => attempt.error === code);
+}
+
+/**
+ * LiveQA's Sprint 5 round-1 live test, issue 2: a live-side 403 was
+ * presented as an "authentication error" with no next step — diagnosing
+ * every 403 as a credentials problem. The first real site this tool met
+ * was Cloudflare-managed-challenge (a bot-protection 403, nothing to do
+ * with credentials), which is exactly the ambiguity 403 carries that 401
+ * doesn't. Scope, per direct instruction: a generic, honest "the site
+ * refused the request" for 403 — distinct from 401's wording — and
+ * nothing WAF/Cloudflare-specific (that's Sprint 7, already written, and
+ * keys off a response header this module doesn't have).
+ */
+function describeLiveAuthMessage(status) {
+  if (status === 403) {
+    return 'This live site refused the request (HTTP 403).';
+  }
+  return `This live site rejected the request with an authentication error (HTTP ${status}).`;
 }
 
 /**
@@ -53,19 +94,22 @@ function describeSitemapError(err, { side, editUrl }) {
     if (side === 'staging') {
       return { message: STAGING_AUTH_MESSAGE, editUrl };
     }
-    return { message: `This live site rejected the request with an authentication error (HTTP ${err.status}).` };
+    return { message: describeLiveAuthMessage(err.status) };
   }
 
   if (err instanceof errors.SitemapDiscoveryFailedError) {
-    if (hasAuthAttempt(err)) {
+    const authAttempt = findAuthAttempt(err);
+    if (authAttempt) {
       if (side === 'staging') {
         return { message: STAGING_AUTH_MESSAGE, editUrl };
       }
-      return {
-        message:
-          'This live site rejected requests with an authentication error while trying to discover its sitemap.',
-      };
+      return { message: describeLiveAuthMessage(authAttempt.error === 'HTTP_403' ? 403 : 401) };
     }
+
+    if (allAttemptsFailedWithCode(err, DNS_ERROR_CODE)) {
+      return { message: "Could not resolve this site's domain name." };
+    }
+
     return {
       message:
         'Could not automatically discover a sitemap for this site. Paste a sitemap URL below and run the scan again.',

@@ -98,6 +98,88 @@ describe('describeSitemapError', () => {
     });
   });
 
+  describe('LiveQA Sprint 5 round-1 live test, issue 1 — DNS failure buried in the discovery attempts log', () => {
+    test('every attempt failing with DNS_ERROR surfaces the same DNS message the manual-URL path already gives', () => {
+      const attempts = [
+        { url: 'https://staging.test/robots.txt', method: 'robots.txt', ok: false, error: 'DNS_ERROR' },
+        { url: 'https://staging.test/sitemap_index.xml', method: 'candidate', ok: false, error: 'DNS_ERROR' },
+        { url: 'https://staging.test/wp-sitemap.xml', method: 'candidate', ok: false, error: 'DNS_ERROR' },
+        { url: 'https://staging.test/sitemap.xml', method: 'candidate', ok: false, error: 'DNS_ERROR' },
+      ];
+      const discoveryResult = describeSitemapError(new errors.SitemapDiscoveryFailedError(attempts), { side: 'staging' });
+      const manualResult = describeSitemapError(
+        new errors.DnsResolutionError('https://staging.test/sitemap.xml', new Error('ENOTFOUND')),
+        { side: 'staging' }
+      );
+      assert.equal(discoveryResult.message, manualResult.message, 'the two paths must now agree');
+      assert.match(discoveryResult.message, /could not resolve/i);
+      assert.doesNotMatch(discoveryResult.message, /paste a sitemap url/i);
+    });
+
+    test('a MIX of DNS_ERROR and other codes does not (falsely) claim a DNS problem — falls through to the generic prompt', () => {
+      const attempts = [
+        { url: 'https://staging.test/robots.txt', method: 'robots.txt', ok: false, error: 'DNS_ERROR' },
+        { url: 'https://staging.test/sitemap_index.xml', method: 'candidate', ok: false, error: 'HTTP_404' },
+      ];
+      const result = describeSitemapError(new errors.SitemapDiscoveryFailedError(attempts), { side: 'staging' });
+      assert.doesNotMatch(result.message, /could not resolve/i);
+      assert.match(result.message, /paste a sitemap url/i);
+    });
+
+    test('works identically for the live side', () => {
+      const attempts = [{ url: 'https://live.test/robots.txt', method: 'robots.txt', ok: false, error: 'DNS_ERROR' }];
+      const result = describeSitemapError(new errors.SitemapDiscoveryFailedError(attempts), { side: 'live' });
+      assert.match(result.message, /could not resolve/i);
+    });
+  });
+
+  describe('LiveQA Sprint 5 round-1 live test, issue 2 — a live-side 403 is not an "authentication error"', () => {
+    test('a direct 403 on the live side is a generic "refused the request", not an auth claim', () => {
+      const result = describeSitemapError(new errors.HttpAuthError('https://live.test/sitemap.xml', 403), {
+        side: 'live',
+      });
+      assert.match(result.message, /refused the request/i);
+      assert.match(result.message, /403/);
+      assert.doesNotMatch(result.message, /authentication error/i);
+    });
+
+    test('a direct 401 on the live side keeps the distinct "authentication error" wording', () => {
+      const result = describeSitemapError(new errors.HttpAuthError('https://live.test/sitemap.xml', 401), {
+        side: 'live',
+      });
+      assert.match(result.message, /authentication error/i);
+      assert.doesNotMatch(result.message, /refused the request/i);
+    });
+
+    test('401 and 403 on the live side produce genuinely different text', () => {
+      const r401 = describeSitemapError(new errors.HttpAuthError('https://live.test/sitemap.xml', 401), { side: 'live' });
+      const r403 = describeSitemapError(new errors.HttpAuthError('https://live.test/sitemap.xml', 403), { side: 'live' });
+      assert.notEqual(r401.message, r403.message);
+    });
+
+    test('a 403-coded discovery-attempts failure on the live side gets the same generic wording as a direct 403', () => {
+      const attempts = [{ url: 'https://live.test/robots.txt', method: 'robots.txt', ok: false, error: 'HTTP_403' }];
+      const discoveryResult = describeSitemapError(new errors.SitemapDiscoveryFailedError(attempts), { side: 'live' });
+      const directResult = describeSitemapError(new errors.HttpAuthError('https://live.test/robots.txt', 403), {
+        side: 'live',
+      });
+      assert.equal(discoveryResult.message, directResult.message);
+    });
+
+    test('the staging side is unaffected — still the .htaccess message regardless of 401 vs 403', () => {
+      const r401 = describeSitemapError(new errors.HttpAuthError('https://staging.test/sitemap.xml', 401), {
+        side: 'staging',
+        editUrl: '/projects/abc/edit',
+      });
+      const r403 = describeSitemapError(new errors.HttpAuthError('https://staging.test/sitemap.xml', 403), {
+        side: 'staging',
+        editUrl: '/projects/abc/edit',
+      });
+      assert.equal(r401.message, r403.message);
+      assert.match(r401.message, /\.htaccess/);
+    });
+  });
+
   test('every named lib/sitemap error type produces a non-empty message', () => {
     const cases = [
       new errors.HttpNotFoundError('https://x.test/sitemap.xml'),

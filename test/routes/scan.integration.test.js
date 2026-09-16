@@ -545,6 +545,106 @@ describe('typed error presentation — staging 401 (requirement 10)', () => {
   });
 });
 
+describe('LiveQA Sprint 5 round-1 live test, issue 1 — DNS failure on the discovery path', () => {
+  test('a staging host that does not resolve gives the same DNS message on the discovery path as the manual-URL path', async () => {
+    // unresolvable.test is deliberately absent from the fake DNS map
+    // (which only knows live.test/staging.test), so every discovery
+    // attempt against it fails with DnsResolutionError — exactly
+    // mirroring the real staging1.wordzite.com NXDOMAIN LiveQA hit.
+    const routes = {
+      'https://live.test/robots.txt': notFound(),
+      'https://live.test/sitemap_index.xml': { body: LIVE_INDEX_XML },
+      'https://live.test/page-sitemap.xml': { body: LIVE_PAGE_XML },
+      'https://live.test/post-sitemap.xml': { body: LIVE_POST_XML },
+      'https://live.test/old-page/': html('Old Page Title'),
+    };
+    const { app } = createTestApp({ routes });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent, { stagingUrl: 'https://unresolvable.test' });
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    const res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+    assert.equal(res.status, 200);
+    // EJS entity-escapes the apostrophe (&#39;) — match around it.
+    assert.match(res.text, /Could not resolve this site.{1,6}s domain name/);
+    assert.doesNotMatch(res.text, /Could not automatically discover a sitemap/);
+  });
+});
+
+describe('LiveQA Sprint 5 round-1 live test, issue 2 — a live-side 403 is not presented as an auth problem', () => {
+  test('every discovery attempt 403ing on the live side gives a generic "refused the request" message, distinct from the staging .htaccess wording', async () => {
+    const routes = {
+      'https://live.test/robots.txt': { status: 403 },
+      'https://live.test/sitemap_index.xml': { status: 403 },
+      'https://live.test/wp-sitemap.xml': { status: 403 },
+      'https://live.test/sitemap.xml': { status: 403 },
+      'https://staging.test/robots.txt': notFound(),
+      'https://staging.test/sitemap_index.xml': { body: STAGING_INDEX_XML },
+      'https://staging.test/page-sitemap.xml': { body: STAGING_PAGE_XML },
+      'https://staging.test/post-sitemap.xml': { body: STAGING_POST_XML },
+      'https://staging.test/new-page/': html('New Page Title'),
+    };
+    const { app } = createTestApp({ routes });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent);
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    const res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+    assert.equal(res.status, 200);
+    assert.match(res.text, /refused the request/i);
+    assert.match(res.text, /403/);
+    assert.doesNotMatch(res.text, /Live.{0,20}authentication error/is);
+    // No edit link offered for the live side — there is no live
+    // credential field.
+    assert.doesNotMatch(res.text, /Live scan failed:[^<]*<a href/i);
+  });
+
+  test('a direct 403 on a manually-supplied live sitemap URL gets the same generic wording', async () => {
+    const routes = {
+      'https://live.test/my-live-sitemap.xml': { status: 403 },
+      'https://staging.test/robots.txt': notFound(),
+      'https://staging.test/sitemap_index.xml': { body: STAGING_INDEX_XML },
+      'https://staging.test/page-sitemap.xml': { body: STAGING_PAGE_XML },
+      'https://staging.test/post-sitemap.xml': { body: STAGING_POST_XML },
+      'https://staging.test/new-page/': html('New Page Title'),
+    };
+    const { app } = createTestApp({ routes });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent);
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    const res = await agent
+      .post(`/projects/${id}/scan`)
+      .type('form')
+      .send({ _csrf: csrfToken, manualLiveSitemapUrl: 'https://live.test/my-live-sitemap.xml' });
+    assert.equal(res.status, 200);
+    assert.match(res.text, /refused the request/i);
+  });
+
+  test('a live-side 401 (distinct from 403) keeps its own authentication-error wording', async () => {
+    const routes = {
+      'https://live.test/robots.txt': { status: 401 },
+      'https://live.test/sitemap_index.xml': { status: 401 },
+      'https://live.test/wp-sitemap.xml': { status: 401 },
+      'https://live.test/sitemap.xml': { status: 401 },
+      'https://staging.test/robots.txt': notFound(),
+      'https://staging.test/sitemap_index.xml': { body: STAGING_INDEX_XML },
+      'https://staging.test/page-sitemap.xml': { body: STAGING_PAGE_XML },
+      'https://staging.test/post-sitemap.xml': { body: STAGING_POST_XML },
+      'https://staging.test/new-page/': html('New Page Title'),
+    };
+    const { app } = createTestApp({ routes });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent);
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    const res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+    assert.equal(res.status, 200);
+    assert.match(res.text, /authentication error/i);
+    assert.doesNotMatch(res.text, /refused the request/i);
+  });
+});
+
 describe('partial result — one side fails, the other still renders (requirement 11)', () => {
   test('a fully-failed staging side still shows the live side\'s findings, clearly labelled partial', async () => {
     const routes = {
@@ -598,8 +698,10 @@ describe('partial result — one side fails, the other still renders (requiremen
     assert.match(res.text, /\.htaccess/);
     assert.match(res.text, new RegExp(`href="/projects/${id}/edit"`));
     // The live-side wording is separate and must not ALSO claim
-    // .htaccess credentials — there's no live credential field.
-    assert.match(res.text, /This live site rejected requests with an authentication error/);
+    // .htaccess credentials — there's no live credential field. Both
+    // paths (direct HttpAuthError and discovery-attempts) now share the
+    // same describeLiveAuthMessage() wording.
+    assert.match(res.text, /This live site rejected the request with an authentication error/);
   });
 });
 
