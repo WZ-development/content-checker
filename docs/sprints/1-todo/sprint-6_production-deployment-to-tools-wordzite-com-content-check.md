@@ -24,7 +24,8 @@ This sprint exists to close that gap, and to collect the deferred items both gat
 6. HTTPS enforced; the session cookie is issued `Secure` in production.
 7. A documented deploy and rollback procedure, short enough that someone other than its author can follow it.
 8. `/content-check/healthz` reachable unauthenticated on the live host for monitoring.
-9. **README note on `bin/hash-password.js`:** QA1 observed the password is passed as an argv and lands in the operator's shell history. Document clearing it or using a leading space.
+9. **Confirm the host's egress IP is static, and if so, tighten the CDN allow rule.** Sprint 7 documents the rule as header-only with a marked placeholder for `and ip.src eq <egress IP>`. This sprint fills that placeholder with the real value in `docs/cdn-allow-rule.md`, updates the rule on `www.wordzite.com` by hand, and confirms a scan from the deployed instance passes it. If the host cannot provide a static egress IP, record that decision in the doc and leave the rule header-only; do not guess an IP. The rollout of the final rule across managed Cloudflare accounts via the user's API tooling happens after this sprint, against the final rule text.
+10. **README note on `bin/hash-password.js`:** QA1 observed the password is passed as an argv and lands in the operator's shell history. Document clearing it or using a leading space.
 
 ### Acceptance Criteria
 - QA1 confirms no secret is committed, and that every variable in requirement 2 is sourced from the host environment.
@@ -46,7 +47,7 @@ This sprint exists to close that gap, and to collect the deferred items both gat
 
 ### Dependencies
 - Blocks: nothing. This is the last V1 sprint.
-- Blocked by: **Sprints 1–5 all complete, AND a provisioned host.** The host is the hard blocker and it is external — do not start this sprint on the assumption it will be ready.
+- Blocked by: **Sprints 1–5 and 7 all complete, AND a provisioned host.** Sprint 7 precedes this by sequencing decision so the deployed build already sends the identification header. The host is the hard blocker and it is external — do not start this sprint on the assumption it will be ready.
 - External: `tools.wordzite.com` provisioned with Node 24, a reverse proxy configured to forward `/content-check`, TLS, and a way to set environment variables. Confirm the real proxy hop count before requirement 3 can be satisfied.
 
 ### Risks & Mitigations

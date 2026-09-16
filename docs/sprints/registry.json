@@ -1,5 +1,5 @@
 {
-  "next_id": 7,
+  "next_id": 8,
   "sprints": {
     "1": {
       "title": "Application foundation, shared-password auth, and relative routing",
@@ -28,14 +28,20 @@
     "5": {
       "title": "Scan workflow and audit results UI",
       "epic": "Reporting UI",
-      "status": "in_progress",
-      "file": "docs/sprints/2-in-progress/sprint-5_scan-workflow-and-audit-results-ui.md"
+      "status": "done",
+      "file": "docs/sprints/3-done/sprint-5_scan-workflow-and-audit-results-ui--done.md"
     },
     "6": {
       "title": "Production deployment to tools.wordzite.com/content-check",
       "epic": "Deployment",
       "status": "todo",
       "file": "docs/sprints/1-todo/sprint-6_production-deployment-to-tools-wordzite-com-content-check.md"
+    },
+    "7": {
+      "title": "Outbound identification token and CDN challenge guidance",
+      "epic": "Deployment",
+      "status": "todo",
+      "file": "docs/sprints/1-todo/sprint-7_outbound-identification-token-and-cdn-challenge-guidance.md"
     }
   }
 }
