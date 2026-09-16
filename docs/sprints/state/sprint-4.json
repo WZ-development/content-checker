@@ -1,16 +1,16 @@
 {
   "id": 4,
   "title": "Content comparison and title resolution",
-  "phase": "liveqa_live",
+  "phase": "complete",
   "qa1_audit_result": "PASS",
   "qa1_audit_file_hash": "bf2fca508a2a443735e4f006aa83695d4c3e76362738670c0b2c350f5bdba4e9",
   "qa1_audited_tree_hash": "e34312bf1936410950131c391872cd433b762a5d",
   "last_shipped_commit": "08754c62fb91cf4910cb934df4686aecf5204e27",
-  "groundtruth_result": null,
+  "groundtruth_result": "PASS",
   "audit_rounds": 1,
-  "live_test_rounds": 0,
+  "live_test_rounds": 1,
   "started": "2026-09-15T22:04:01+00:00",
-  "completed": null,
+  "completed": "2026-09-16T07:45:35+00:00",
   "history": [
     {
       "ts": "2026-09-15T22:04:01+00:00",
@@ -35,6 +35,18 @@
       "actor": "pipeman",
       "event": "shipped",
       "detail": "commit=08754c6"
+    },
+    {
+      "ts": "2026-09-16T00:51:33+00:00",
+      "actor": "liveqa",
+      "event": "live_test",
+      "detail": "PASS: LiveQA LIVE TEST \u2014 Sprint 4 (content comparison and title resolution), round 1\nCommit tested: 08754c6 (working tree at HEAD c0f1f1a is byte-identical for all app code \u2014\n`git diff --name-only 08754c6 HEAD` returns only docs/sprints/state/sprint-4.json)\nVerdict: PASS\n\nSCOPE \u2014 SMOKE TEST ONLY, by the sprint file's own terms (acceptance line 44: \"LiveQA's live\nverification of this logic happens in Sprint 5 against the real results screen; this sprint\nships with a live smoke test that the app boots and prior screens are unbroken\").\nTHE COMPARISON / NORMALIZATION / TITLE-RESOLUTION LOGIC IS NOT VERIFIED HERE, and neither are\nthe Sprint 3 carry-forward fixes in lib/sitemap/ that rode along in this commit. All of that\nis Sprint 5's live verification against the real results screen. Sprint 5 should not inherit\nthis PASS for any of it.\nStanding caveats: local instance at BASE_PATH=/content-check, not a deployment (Sprint 6);\nthrowaway secrets; data/ and .env created by me and deleted at cleanup; screenshots\nunavailable in this harness (injection timeouts) \u2014 evidence is DOM text + raw HTTP + SQLite.\n\nCHANGE SURFACE\n  git diff --name-only 08754c6~1 08754c6 excluding docs/ and test/:\n    lib/compare/{compare,extractTitle,index,normalize,slug,titleFetcher,titleSuffix}.js (new)\n    lib/sitemap/{classify,crawl,discovery,errors,httpClient,index,redactUserinfo}.js (carry-forward)\n  Sprint 1/2 surface (src/, views/): UNTOUCHED. package.json: no dependency changes.\n  So the only boot risk is module load, and there is no header/route/template change that\n  could move the screens.\n\nBOOT\n  npm ci from the shipped lockfile: exit 0.\n  require('./lib/compare') -> compareAndResolveTitles, compareSitemaps, resolveTitles\n  require('./lib/sitemap') -> discoverAndParseSitemap, errors, DEFAULTS\n  node src/server.js -> \"[content-checker] listening on port 3000, mounted at /content-check\"\n  Server log across the session: 0 error/unhandled/warn lines.\n\nSPRINT 1 SCREENS\n  unauth GET /          -> 302 /content-check/login\n  wrong password        -> 401 \"Incorrect password. Please try again.\"\n  correct password      -> 302 /content-check/ ; \"You're authenticated. Manage projects.\"\n                           Cache-Control: no-store, no-cache, must-revalidate\n  logout                -> 302 login ; Set-Cookie: content-checker.sid=; Path=/content-check; Expires 1970\n  replay dead cookie    -> 302 login\n  Back after logout (browser; strict gate \u2014 server confirmed unauthenticated before Back)\n                        -> /content-check/login, no project data, no credential indicator,\n                           navType back_forward. Handler present on every screen (grep persisted).\n\nSPRINT 2 SCREENS\n  /projects empty       -> 200 \"No projects yet.\"\n  /projects/new         -> labels Project name / Live URL / Staging URL / Username / Password; _csrf present\n  create, private IP    -> 400 \"This URL points to a private, loopback, or link-local address, \u2026\"\n  create, valid + pw    -> 302 list; \"Browser Smoke 4 | https://bs4.example.com |\n                           https://staging.bs4.example.com | Password stored\"; trailing slash\n                           stripped; plaintext nowhere in HTML\n  edit                  -> prefill correct; password field \"\" with no value attribute;\n                           \"A password is currently stored.\"; clear control present;\n                           Cache-Control no-store; handler present; plaintext 0\n  edit blank keeps      -> POST /projects/:id blank password: 302; list \"Smoke4b | Password\n                           stored\"; stored column decrypts to \"Smoke4Pw-1\" (original)\n  delete confirm        -> \"Delete Smoke4b and its stored credentials? This cannot be undone.\"\n                           (name is inside <strong>, which is why a raw-HTML grep for the\n                           sentence misses it \u2014 my grep, noted so nobody chases it); GET does\n                           not delete (rows still 1); POST -> 302; \"No projects yet.\"\n  CSRF missing          -> 403 text/html\n  console               -> 0 errors across every screen and the Back cycle\n\nRECOMMENDATION\nShip-ready for what this sprint asked LiveQA to check: boots from a clean install, and every\nSprint 1 and Sprint 2 screen, header and storage behaviour is exactly as at Sprint 2 close.\nThe compare/title logic and the Sprint 3 carry-forward fixes are unverified by LiveQA by\ndesign and remain Sprint 5's \u2014 that sprint now owes a real live run covering both engines.\n\nSprint is ready to close once the user says so. That call is the user's, not mine."
+    },
+    {
+      "ts": "2026-09-16T07:45:35+00:00",
+      "actor": "dev-team",
+      "event": "sprint_closed",
+      "detail": "user_said=/sprint-complete 4"
     }
   ]
 }
