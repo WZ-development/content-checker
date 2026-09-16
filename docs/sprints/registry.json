@@ -28,8 +28,8 @@
     "5": {
       "title": "Scan workflow and audit results UI",
       "epic": "Reporting UI",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-5_scan-workflow-and-audit-results-ui.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-5_scan-workflow-and-audit-results-ui.md"
     },
     "6": {
       "title": "Production deployment to tools.wordzite.com/content-check",

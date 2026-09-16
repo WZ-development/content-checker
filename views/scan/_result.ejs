@@ -1,0 +1,90 @@
+<% if (scanResult.status === 'success') { %>
+  <% const c = scanResult.comparison; %>
+  <% const totalDiff = c.onLiveOnly.length + c.onStagingOnly.length; %>
+  <% const truncatedSides = []; %>
+  <% if (c.completeness.live.truncated) truncatedSides.push('live'); %>
+  <% if (c.completeness.staging.truncated) truncatedSides.push('staging'); %>
+
+  <% if (truncatedSides.length > 0) { %>
+    <p class="notice notice-warning" role="alert">
+      ⚠ This comparison may be incomplete — the <%= truncatedSides.join(' and ') %> scan was cut off before finishing (too many sitemaps, or it ran out of time). The results below are real, but may not be the full picture.
+    </p>
+  <% } %>
+
+  <p class="scan-summary">
+    Compared live and staging: <strong><%= c.onLiveOnly.length %></strong> on live only,
+    <strong><%= c.onStagingOnly.length %></strong> on staging only,
+    <strong><%= c.onBothCount %></strong> present on both.
+  </p>
+
+  <% if (totalDiff === 0) { %>
+    <p class="notice notice-success" role="status">✅ No differences found — safe to push.</p>
+  <% } else { %>
+    <section class="result-section result-section-risk">
+      <h2>On live, missing from staging</h2>
+      <p class="section-framing">These will be lost if you push staging live.</p>
+      <h3>Pages</h3>
+      <%- include('_item-list', { items: scanResult.onLiveOnlyGrouped.pages }) %>
+      <h3>Posts</h3>
+      <%- include('_item-list', { items: scanResult.onLiveOnlyGrouped.posts }) %>
+      <% if (scanResult.onLiveOnlyGrouped.other.length > 0) { %>
+        <h3>Other</h3>
+        <%- include('_item-list', { items: scanResult.onLiveOnlyGrouped.other }) %>
+      <% } %>
+    </section>
+
+    <section class="result-section result-section-info">
+      <h2>On staging, not yet on live</h2>
+      <p class="section-framing">Likely the new work about to ship — informational only.</p>
+      <h3>Pages</h3>
+      <%- include('_item-list', { items: scanResult.onStagingOnlyGrouped.pages }) %>
+      <h3>Posts</h3>
+      <%- include('_item-list', { items: scanResult.onStagingOnlyGrouped.posts }) %>
+      <% if (scanResult.onStagingOnlyGrouped.other.length > 0) { %>
+        <h3>Other</h3>
+        <%- include('_item-list', { items: scanResult.onStagingOnlyGrouped.other }) %>
+      <% } %>
+    </section>
+  <% } %>
+
+<% } else if (scanResult.status === 'partial') { %>
+  <p class="notice notice-warning" role="alert">
+    ⚠ Partial result — one side of this scan failed. Showing what was found on the <%= scanResult.rawSideLabel %> site only; this is not a comparison.
+  </p>
+
+  <section class="result-section">
+    <h2><%= scanResult.rawSideLabel === 'live' ? 'Live site' : 'Staging site' %> — found</h2>
+    <h3>Pages</h3>
+    <%- include('_item-list', { items: scanResult.rawGrouped.pages }) %>
+    <h3>Posts</h3>
+    <%- include('_item-list', { items: scanResult.rawGrouped.posts }) %>
+    <% if (scanResult.rawGrouped.other.length > 0) { %>
+      <h3>Other</h3>
+      <%- include('_item-list', { items: scanResult.rawGrouped.other }) %>
+    <% } %>
+  </section>
+
+  <% if (!scanResult.live.ok) { %>
+    <p class="notice notice-error" role="alert">
+      <strong>Live scan failed:</strong> <%= scanResult.live.error.message %>
+      <% if (scanResult.live.error.editUrl) { %> <a href="<%= scanResult.live.error.editUrl %>">Edit project</a><% } %>
+    </p>
+  <% } %>
+  <% if (!scanResult.staging.ok) { %>
+    <p class="notice notice-error" role="alert">
+      <strong>Staging scan failed:</strong> <%= scanResult.staging.error.message %>
+      <% if (scanResult.staging.error.editUrl) { %> <a href="<%= scanResult.staging.error.editUrl %>">Edit project</a><% } %>
+    </p>
+  <% } %>
+
+<% } else { %>
+  <p class="notice notice-error" role="alert">Scan failed — neither site could be read.</p>
+  <p class="notice notice-error" role="alert">
+    <strong>Live:</strong> <%= scanResult.live.error.message %>
+    <% if (scanResult.live.error.editUrl) { %> <a href="<%= scanResult.live.error.editUrl %>">Edit project</a><% } %>
+  </p>
+  <p class="notice notice-error" role="alert">
+    <strong>Staging:</strong> <%= scanResult.staging.error.message %>
+    <% if (scanResult.staging.error.editUrl) { %> <a href="<%= scanResult.staging.error.editUrl %>">Edit project</a><% } %>
+  </p>
+<% } %>

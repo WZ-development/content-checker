@@ -1,6 +1,7 @@
 'use strict';
 
 const path = require('node:path');
+const dns = require('node:dns');
 const express = require('express');
 const session = require('express-session');
 
@@ -13,8 +14,10 @@ const { createAuthRouter } = require('./routes/auth');
 const { createHealthRouter } = require('./routes/health');
 const { createLandingRouter } = require('./routes/landing');
 const { createProjectsRouter } = require('./routes/projects');
+const { createScanRouter } = require('./routes/scan');
 const { openDatabase } = require('./db/database');
 const { createProjectsRepository } = require('./db/projectsRepository');
+const { createPinnedFetch } = require('../lib/net/pinnedFetch');
 
 const DEFAULT_DB_PATH = path.join(__dirname, '..', 'data', 'content-checker.db');
 
@@ -27,13 +30,29 @@ const DEFAULT_DB_PATH = path.join(__dirname, '..', 'data', 'content-checker.db')
  * `repository` is injectable so tests can pass one backed by an
  * in-memory database instead of touching disk; server.js's real startup
  * path leaves it unset and gets the real file-backed store.
+ *
+ * `fetchImpl`/`dnsLookup` are injectable the same way, for the same
+ * reason: tests get a fixture-driven fake (see test/sitemap/testHarness
+ * .js) instead of the real network. Left unset, createPinnedFetch()
+ * builds the real connection-pinned pair — sprint 5, requirement 14 —
+ * exactly ONCE per app instance, right here, and the identical pair is
+ * handed to the scan router, which passes it unchanged into both
+ * lib/sitemap's crawler and lib/compare's title fetcher. No other
+ * module ever constructs its own fetch implementation.
  */
-function createApp(config, { repository } = {}) {
+function createApp(config, { repository, fetchImpl, dnsLookup } = {}) {
   const app = express();
   const mountPath = config.basePath === '' ? '/' : config.basePath;
   const urlHelper = createUrlHelper(config.basePath);
   const projectsRepository =
     repository || createProjectsRepository(openDatabase(DEFAULT_DB_PATH), config.encryptionKey);
+  // fetchImpl presence alone selects test-injection mode — a caller
+  // supplying a fake fetch almost always wants its own dnsLookup too
+  // (see test/sitemap/testHarness.js), but falls back to the real
+  // resolver if it didn't provide one, rather than silently pinning.
+  const pinnedFetch = fetchImpl
+    ? { fetchImpl, dnsLookup: dnsLookup || dns.promises.lookup }
+    : createPinnedFetch({ dnsLookup });
 
   app.set('trust proxy', 1);
   app.set('view engine', 'ejs');
@@ -92,6 +111,14 @@ function createApp(config, { repository } = {}) {
   appRouter.use(attachCsrfToken);
   appRouter.use(createLandingRouter({ urlHelper }));
   appRouter.use(createProjectsRouter({ urlHelper, repository: projectsRepository }));
+  appRouter.use(
+    createScanRouter({
+      urlHelper,
+      repository: projectsRepository,
+      fetchImpl: pinnedFetch.fetchImpl,
+      dnsLookup: pinnedFetch.dnsLookup,
+    })
+  );
 
   appRouter.use((req, res) => {
     res.status(404).send('Not found');

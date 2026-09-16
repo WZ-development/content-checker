@@ -38,6 +38,7 @@
               <td><a href="<%= project.stagingUrl %>" target="_blank" rel="noopener noreferrer"><%= project.stagingUrl %></a></td>
               <td><%= project.hasPassword ? 'Password stored' : 'No password' %></td>
               <td class="row-actions">
+                <a href="<%= url('/projects/' + project.id + '/scan') %>">Scan</a>
                 <a href="<%= url('/projects/' + project.id + '/edit') %>">Edit</a>
                 <a href="<%= url('/projects/' + project.id + '/delete') %>">Delete</a>
               </td>

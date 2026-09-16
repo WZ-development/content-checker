@@ -34,6 +34,15 @@ are stored in a local SQLite file at `data/content-checker.db`, created
 automatically on first run. Basic-auth passwords are encrypted at rest
 with `ENCRYPTION_KEY` (AES-256-GCM) — the file itself is gitignored.
 
+Scanning a project (`/projects/:id/scan`) discovers each side's sitemap,
+compares the two URL sets, and resolves a title for every differing
+page — on demand, nothing is stored. All outbound requests (sitemap
+fetches and title fetches alike) go through one connection-pinned fetch
+implementation built once per app instance (`lib/net/pinnedFetch.js`):
+the DNS lookup used to approve an address is the exact same lookup used
+to open the connection, so there's no window between "checked safe" and
+"connected to" for an address to change in.
+
 ## Run
 
 ```bash

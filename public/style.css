@@ -5,6 +5,19 @@
   --accent: #2b5fd9;
   --error: #b3261e;
   --border: #d4d4d4;
+  /* Deliberately inverted from the usual red=danger/green=safe
+     convention — see Sprint 5's Context. Only "on live, missing from
+     staging" maps to real, permanent loss (PRD §2); "on staging, not
+     live" is normally just the work about to ship. Green is the alarm
+     here because it's the one that maps to actual risk. */
+  --risk: #1a7f37;
+  --risk-bg: #e6f4ea;
+  --info: #b3261e;
+  --info-bg: #fbe9e7;
+  --warning: #7a5900;
+  --warning-bg: #fff4d6;
+  --success: #1a7f37;
+  --success-bg: #e6f4ea;
 }
 
 * {
@@ -192,4 +205,141 @@ body {
   font-size: 0.875rem;
   font-weight: 600;
   padding: 0 0.25rem;
+}
+
+/* Scan screen */
+
+.scan-form {
+  margin-top: 1.5rem;
+  max-width: 40rem;
+}
+
+.manual-sitemap-details {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.manual-sitemap-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.manual-sitemap-details .field {
+  margin-top: 0.75rem;
+}
+
+.scan-progress {
+  margin-top: 0.5rem;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.notice {
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  margin: 1rem 0;
+  font-size: 0.9rem;
+}
+
+.notice-warning {
+  background: var(--warning-bg);
+  color: var(--warning);
+  border: 1px solid var(--warning);
+}
+
+.notice-success {
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid var(--success);
+  font-weight: 600;
+}
+
+.notice-error {
+  background: var(--info-bg);
+  color: var(--error);
+  border: 1px solid var(--error);
+}
+
+.scan-summary {
+  font-size: 0.95rem;
+  margin: 1rem 0;
+}
+
+.result-section {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.result-section-risk {
+  border-color: var(--risk);
+  background: var(--risk-bg);
+}
+
+.result-section-risk h2 {
+  color: var(--risk);
+}
+
+.result-section-info {
+  border-color: var(--info);
+  background: var(--info-bg);
+}
+
+.result-section-info h2 {
+  color: var(--info);
+}
+
+.section-framing {
+  font-style: italic;
+  color: #444;
+  margin-top: -0.5rem;
+}
+
+.result-section h3 {
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #555;
+  margin-bottom: 0.35rem;
+}
+
+.result-list {
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+.result-list li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.result-url {
+  color: #666;
+  font-size: 0.8rem;
+}
+
+.approx-badge {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: #e0e0e0;
+  color: #444;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+}
+
+.empty-group {
+  color: #777;
+  font-size: 0.85rem;
+  font-style: italic;
+  margin: 0 0 1rem;
 }

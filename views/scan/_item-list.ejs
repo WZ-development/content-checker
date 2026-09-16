@@ -1,0 +1,13 @@
+<% if (items.length === 0) { %>
+  <p class="empty-group">None.</p>
+<% } else { %>
+<ul class="result-list">
+  <% items.forEach(function (item) { %>
+    <li>
+      <a href="<%= item.url %>" target="_blank" rel="noopener noreferrer"><%= item.title %></a>
+      <% if (item.titleSource === 'slug') { %><span class="approx-badge" title="Title could not be fetched — derived from the URL instead">approx.</span><% } %>
+      <span class="result-url"><%= item.url %></span>
+    </li>
+  <% }); %>
+</ul>
+<% } %>

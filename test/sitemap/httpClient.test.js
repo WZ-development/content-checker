@@ -111,6 +111,31 @@ describe('createGuardedFetch', () => {
       await assert.rejects(() => guardedFetch('https://good.test/x.xml'), ConnectionError);
     });
 
+    test('a connection-time SSRF rejection from a pinned fetchImpl (sprint 5, requirement 14) surfaces as SsrfBlockedError', async () => {
+      // Mirrors exactly what undici's fetch does when lib/net/pinnedFetch
+      // .js's Agent connect.lookup rejects: a "fetch failed" TypeError
+      // whose .cause is the original PINNED_SSRF_BLOCKED-coded error.
+      const fetchImpl = async () => {
+        const cause = Object.assign(new Error('Refusing to connect: disallowed address (169.254.169.254)'), {
+          code: 'PINNED_SSRF_BLOCKED',
+          address: '169.254.169.254',
+        });
+        throw Object.assign(new TypeError('fetch failed'), { cause });
+      };
+      const guardedFetch = createGuardedFetch({
+        fetchImpl,
+        dnsLookup: createFakeDnsLookup(PUBLIC_DNS),
+        timeoutMs: 1000,
+        userAgent: 'TestBot/1.0',
+        maxRedirects: 5,
+      });
+      await assert.rejects(() => guardedFetch('https://good.test/x.xml'), (err) => {
+        assert.ok(err instanceof SsrfBlockedError);
+        assert.equal(err.address, '169.254.169.254');
+        return true;
+      });
+    });
+
     test('a request that exceeds the per-request timeout produces SitemapTimeoutError', async () => {
       const { guardedFetch } = makeGuardedFetch(
         { 'https://good.test/slow.xml': { body: 'ok', delayMs: 200 } },

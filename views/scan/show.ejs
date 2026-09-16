@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<%- include('../partials/head', { title: 'Scan: ' + project.name + ' — Content Checker' }) %>
+</head>
+<body>
+  <main class="app-shell">
+    <header class="app-header">
+      <h1>Scan: <%= project.name %></h1>
+      <nav class="header-actions">
+        <a href="<%= url('/projects') %>">Projects</a>
+        <form method="post" action="<%= url('/logout') %>">
+          <button type="submit" class="link-button">Log out</button>
+        </form>
+      </nav>
+    </header>
+
+    <% if (alreadyRunning) { %>
+      <p class="notice notice-warning" role="alert">A scan for this project is already running. Please wait for it to finish before starting another.</p>
+    <% } %>
+
+    <form method="post" action="<%= url('/projects/' + project.id + '/scan') %>" id="scan-form" class="scan-form">
+      <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+
+      <details class="manual-sitemap-details"<% if (scanResult && scanResult.status !== 'success') { %> open<% } %>>
+        <summary>Manual sitemap URLs (optional)</summary>
+        <div class="field">
+          <label for="manualLiveSitemapUrl">Live sitemap URL</label>
+          <input type="text" id="manualLiveSitemapUrl" name="manualLiveSitemapUrl" value="<%= manualLiveSitemapUrl %>" placeholder="https://example.com/sitemap.xml">
+        </div>
+        <div class="field">
+          <label for="manualStagingSitemapUrl">Staging sitemap URL</label>
+          <input type="text" id="manualStagingSitemapUrl" name="manualStagingSitemapUrl" value="<%= manualStagingSitemapUrl %>" placeholder="https://staging.example.com/sitemap.xml">
+        </div>
+        <p class="field-hint">Leave blank to auto-discover. If auto-discovery fails for a site, paste its sitemap URL here and run the scan again — everything else on this page stays as-is.</p>
+      </details>
+
+      <button type="submit" id="scan-trigger">Run scan</button>
+      <p id="scan-progress" class="scan-progress" hidden>Scanning… this can take up to a minute for larger sites.</p>
+    </form>
+
+    <script>
+      // Progressive enhancement only (no bundler, per Sprint 1). This is
+      // purely the VISIBLE in-progress state (requirement 3) — the actual
+      // guard against two concurrent scans is server-side
+      // (src/routes/scan.js's scansInProgress set), so this degrades
+      // harmlessly with JS disabled: the browser's own loading indicator
+      // is still there, just without the extra copy/disabled state.
+      (function () {
+        var form = document.getElementById('scan-form');
+        var trigger = document.getElementById('scan-trigger');
+        var progress = document.getElementById('scan-progress');
+        form.addEventListener('submit', function () {
+          trigger.disabled = true;
+          trigger.textContent = 'Scanning…';
+          progress.hidden = false;
+        });
+      })();
+    </script>
+
+    <% if (scanResult) { %>
+      <%- include('_result', { scanResult, project, url }) %>
+    <% } %>
+  </main>
+</body>
+</html>
