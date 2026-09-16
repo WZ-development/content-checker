@@ -2,6 +2,32 @@
 
 const { errors } = require('../../lib/sitemap/index');
 
+const STAGING_AUTH_MESSAGE =
+  'This staging site requires HTTP Basic Auth (.htaccess) credentials to access its sitemap. Add them on the project’s edit screen.';
+
+const AUTH_CODES = new Set(['HTTP_401', 'HTTP_403']);
+
+/**
+ * QA1's Sprint 5 audit, finding B: automatic discovery (robots.txt, then
+ * each candidate path — see lib/sitemap/discovery.js) catches an
+ * individual attempt's failure and keeps trying the next one, so a 401
+ * on every attempt never propagates as HttpAuthError — it exhausts every
+ * strategy and throws SitemapDiscoveryFailedError instead, indistinguishable
+ * from any other kind of not-found. That's correct behaviour for
+ * discovery (one bad candidate shouldn't stop it trying the next), but
+ * the auth signal it swallows is exactly what requirement 10 needs on
+ * its PRIMARY path — a saved staging URL, no manual sitemap entered,
+ * which is what LiveQA's own criterion scans. The information already
+ * exists: SitemapDiscoveryFailedError.attempts carries `error:
+ * 'HTTP_401'`/`'HTTP_403'` on every row that hit one (discovery.js
+ * records it from each attempt's own err.code). This just reads it
+ * back out, rather than discarding it as the generic "couldn't
+ * discover" case did before this fix.
+ */
+function hasAuthAttempt(discoveryFailedError) {
+  return (discoveryFailedError.attempts || []).some((attempt) => AUTH_CODES.has(attempt.error));
+}
+
 /**
  * Maps a thrown lib/sitemap error into an actionable message for the
  * scan results screen (requirement 10). `side` ('live' | 'staging')
@@ -25,16 +51,21 @@ const { errors } = require('../../lib/sitemap/index');
 function describeSitemapError(err, { side, editUrl }) {
   if (err instanceof errors.HttpAuthError) {
     if (side === 'staging') {
-      return {
-        message:
-          'This staging site requires HTTP Basic Auth (.htaccess) credentials to access its sitemap. Add them on the project’s edit screen.',
-        editUrl,
-      };
+      return { message: STAGING_AUTH_MESSAGE, editUrl };
     }
     return { message: `This live site rejected the request with an authentication error (HTTP ${err.status}).` };
   }
 
   if (err instanceof errors.SitemapDiscoveryFailedError) {
+    if (hasAuthAttempt(err)) {
+      if (side === 'staging') {
+        return { message: STAGING_AUTH_MESSAGE, editUrl };
+      }
+      return {
+        message:
+          'This live site rejected requests with an authentication error while trying to discover its sitemap.',
+      };
+    }
     return {
       message:
         'Could not automatically discover a sitemap for this site. Paste a sitemap URL below and run the scan again.',

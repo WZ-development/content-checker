@@ -18,6 +18,12 @@
   --warning-bg: #fff4d6;
   --success: #1a7f37;
   --success-bg: #e6f4ea;
+  /* Neutral note color — deliberately NOT --info/--info-bg above, which
+     mean "on staging, not live" (red, by the inversion). An ambiguous-
+     sitemap note is a different, unrelated kind of "info" and reusing
+     the same red would read as if it belonged to that section. */
+  --note: #1a4d8f;
+  --note-bg: #e8f0fc;
 }
 
 * {
@@ -261,6 +267,18 @@ body {
   background: var(--info-bg);
   color: var(--error);
   border: 1px solid var(--error);
+}
+
+.notice-info {
+  background: var(--note-bg);
+  color: var(--note);
+  border: 1px solid var(--note);
+}
+
+.completeness-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.25rem;
+  font-size: 0.85rem;
 }
 
 .scan-summary {

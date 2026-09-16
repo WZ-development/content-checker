@@ -1,15 +1,8 @@
 <% if (scanResult.status === 'success') { %>
   <% const c = scanResult.comparison; %>
   <% const totalDiff = c.onLiveOnly.length + c.onStagingOnly.length; %>
-  <% const truncatedSides = []; %>
-  <% if (c.completeness.live.truncated) truncatedSides.push('live'); %>
-  <% if (c.completeness.staging.truncated) truncatedSides.push('staging'); %>
 
-  <% if (truncatedSides.length > 0) { %>
-    <p class="notice notice-warning" role="alert">
-      ⚠ This comparison may be incomplete — the <%= truncatedSides.join(' and ') %> scan was cut off before finishing (too many sitemaps, or it ran out of time). The results below are real, but may not be the full picture.
-    </p>
-  <% } %>
+  <%- include('_completeness-warning', { completeness: scanResult.completeness }) %>
 
   <p class="scan-summary">
     Compared live and staging: <strong><%= c.onLiveOnly.length %></strong> on live only,
@@ -51,6 +44,8 @@
   <p class="notice notice-warning" role="alert">
     ⚠ Partial result — one side of this scan failed. Showing what was found on the <%= scanResult.rawSideLabel %> site only; this is not a comparison.
   </p>
+
+  <%- include('_completeness-warning', { completeness: scanResult.completeness }) %>
 
   <section class="result-section">
     <h2><%= scanResult.rawSideLabel === 'live' ? 'Live site' : 'Staging site' %> — found</h2>

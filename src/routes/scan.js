@@ -5,7 +5,7 @@ const express = require('express');
 const { verifyCsrfToken } = require('../middleware/csrf');
 const { normalizeAndValidateUrl } = require('../lib/urlValidation');
 const { describeSitemapError } = require('../lib/scanErrorPresentation');
-const { groupBySourceType, buildRawSideItems } = require('../lib/scanResultPresentation');
+const { groupBySourceType, buildRawSideItems, summarizeCompleteness } = require('../lib/scanResultPresentation');
 const { discoverAndParseSitemap } = require('../../lib/sitemap/index');
 const { compareAndResolveTitles } = require('../../lib/compare/index');
 
@@ -157,15 +157,23 @@ function createScanRouter({ urlHelper, repository, fetchImpl, dnsLookup }) {
             comparison,
             onLiveOnlyGrouped: groupBySourceType(comparison.onLiveOnly),
             onStagingOnlyGrouped: groupBySourceType(comparison.onStagingOnly),
+            // QA1 Sprint 5 audit, finding C: truncated/skipped/ambiguous
+            // must render alongside results (including a zero-diff
+            // "safe to push") — the comparison's own completeness
+            // slice already carries all three per side; this just
+            // reads all three back, not truncated alone.
+            completeness: summarizeCompleteness(comparison.completeness),
             live,
             staging,
           };
         } else if (live.ok || staging.ok) {
           const okSide = live.ok ? live : staging;
+          const rawSideLabel = live.ok ? 'live' : 'staging';
           scanResult = {
             status: 'partial',
             rawGrouped: groupBySourceType(buildRawSideItems(okSide.result)),
-            rawSideLabel: live.ok ? 'live' : 'staging',
+            rawSideLabel,
+            completeness: summarizeCompleteness({ [rawSideLabel]: okSide.result }),
             live,
             staging,
           };

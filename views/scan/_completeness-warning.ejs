@@ -1,0 +1,42 @@
+<%
+/**
+ * Requirement 8 (QA1 Sprint 5 audit, finding C): truncated, skipped-
+ * with-a-concerning-reason, and ambiguous sitemaps ALL render here,
+ * alongside results — never instead of them, and never silently absent
+ * behind an otherwise-clean zero-difference message. `completeness` is
+ * a summarizeCompleteness() result (src/lib/scanResultPresentation.js).
+ * Shared by both the success and partial branches of _result.ejs so
+ * there is one place this renders, not two copies to keep in sync.
+ */
+%>
+<% if (completeness.hasConcern) { %>
+  <% if (completeness.truncatedSides.length > 0) { %>
+    <p class="notice notice-warning" role="alert">
+      ⚠ This comparison may be incomplete — the <%= completeness.truncatedSides.join(' and ') %> scan was cut off before finishing (too many sitemaps, or it ran out of time). The results below are real, but may not be the full picture.
+    </p>
+  <% } %>
+
+  <% Object.keys(completeness.skippedWarnings).forEach(function (side) { %>
+    <% const items = completeness.skippedWarnings[side]; %>
+    <p class="notice notice-warning" role="alert">
+      ⚠ <%= items.length %> <%= side %> sitemap<%= items.length === 1 ? '' : 's' %> could not be read and <%= items.length === 1 ? 'was' : 'were' %> skipped — the comparison may be missing content from <%= items.length === 1 ? 'it' : 'them' %>:
+      <ul class="completeness-list">
+        <% items.forEach(function (item) { %>
+          <li><%= item.url %> (<%= item.reason %>)</li>
+        <% }); %>
+      </ul>
+    </p>
+  <% }); %>
+
+  <% Object.keys(completeness.ambiguousNotes).forEach(function (side) { %>
+    <% const items = completeness.ambiguousNotes[side]; %>
+    <p class="notice notice-info" role="status">
+      ℹ <%= items.length %> <%= side %> sitemap<%= items.length === 1 ? '' : 's' %> didn't match a known naming convention and <%= items.length === 1 ? 'was' : 'were' %> included anyway — worth checking:
+      <ul class="completeness-list">
+        <% items.forEach(function (item) { %>
+          <li><%= item.url %></li>
+        <% }); %>
+      </ul>
+    </p>
+  <% }); %>
+<% } %>

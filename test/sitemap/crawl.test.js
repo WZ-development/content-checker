@@ -370,4 +370,49 @@ describe('crawlSitemapTree', () => {
     assert.equal(log.length, 2); // both children fetched (root was pre-parsed, no fetch)
     assert.ok(log.every((entry) => Boolean(entry.headers.Authorization)), 'every child request must carry auth');
   });
+
+  describe('rejects non-http(s) <loc> schemes at collection (QA1 Sprint 5 audit, finding A)', () => {
+    test('javascript:, data:, and vbscript: locs never reach result.urls, and are recorded in skipped', async () => {
+      const hostileXml = `<?xml version="1.0"?><urlset>
+        <url><loc>javascript:alert(document.cookie)</loc></url>
+        <url><loc>data:text/html,&lt;script&gt;alert(1)&lt;/script&gt;</loc></url>
+        <url><loc>vbscript:msgbox("x")</loc></url>
+        <url><loc>https://example.test/a-real-page/</loc></url>
+      </urlset>`;
+      const { ctx } = buildCtx({});
+      const parsedDoc = parseSitemapXml(hostileXml);
+      await crawlSitemapTree([{ url: 'https://example.test/urlset.xml', parsedDoc }], ctx);
+
+      // The one legitimate entry made it through.
+      assert.equal(ctx.urls.size, 1);
+      assert.ok(ctx.urls.has('https://example.test/a-real-page/'));
+
+      // None of the hostile schemes reached urls, under any key.
+      for (const url of ctx.urls.keys()) {
+        assert.doesNotMatch(url, /^(javascript|data|vbscript):/i);
+      }
+
+      // Each was recorded, not silently dropped — this module's
+      // standing rule for every other kind of exclusion.
+      const skippedSchemes = ctx.skipped.filter((s) => s.reason === 'invalid-url-scheme').map((s) => s.url);
+      assert.equal(skippedSchemes.length, 3);
+      assert.ok(skippedSchemes.some((u) => u.startsWith('javascript:')));
+      assert.ok(skippedSchemes.some((u) => u.startsWith('data:')));
+      assert.ok(skippedSchemes.some((u) => u.startsWith('vbscript:')));
+    });
+
+    test('a malformed (unparseable) loc is also rejected, not just an unwanted scheme', async () => {
+      const xml = `<?xml version="1.0"?><urlset>
+        <url><loc>not a url at all</loc></url>
+        <url><loc>https://example.test/fine/</loc></url>
+      </urlset>`;
+      const { ctx } = buildCtx({});
+      const parsedDoc = parseSitemapXml(xml);
+      await crawlSitemapTree([{ url: 'https://example.test/urlset.xml', parsedDoc }], ctx);
+
+      assert.equal(ctx.urls.size, 1);
+      assert.ok(ctx.urls.has('https://example.test/fine/'));
+      assert.ok(ctx.skipped.some((s) => s.url === 'not a url at all' && s.reason === 'invalid-url-scheme'));
+    });
+  });
 });

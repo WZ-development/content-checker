@@ -32,9 +32,70 @@ describe('describeSitemapError', () => {
     assert.equal(result.editUrl, undefined);
   });
 
-  test('discovery failure prompts for a manual sitemap URL', () => {
+  test('discovery failure with no auth-coded attempts prompts for a manual sitemap URL', () => {
     const result = describeSitemapError(new errors.SitemapDiscoveryFailedError([]), { side: 'live' });
     assert.match(result.message, /paste a sitemap url/i);
+  });
+
+  describe('QA1 Sprint 5 audit, finding B — a 401/403 buried in the discovery attempts log', () => {
+    test('staging discovery where every attempt 401s produces the .htaccess message and edit link, not the generic prompt', () => {
+      const attempts = [
+        { url: 'https://staging.test/robots.txt', method: 'robots.txt', ok: false, error: 'HTTP_401' },
+        { url: 'https://staging.test/sitemap_index.xml', method: 'candidate', ok: false, error: 'HTTP_401' },
+        { url: 'https://staging.test/wp-sitemap.xml', method: 'candidate', ok: false, error: 'HTTP_401' },
+        { url: 'https://staging.test/sitemap.xml', method: 'candidate', ok: false, error: 'HTTP_401' },
+      ];
+      const result = describeSitemapError(new errors.SitemapDiscoveryFailedError(attempts), {
+        side: 'staging',
+        editUrl: '/projects/abc/edit',
+      });
+      assert.match(result.message, /\.htaccess/);
+      assert.equal(result.editUrl, '/projects/abc/edit');
+      assert.doesNotMatch(result.message, /paste a sitemap url/i);
+    });
+
+    test('a SINGLE auth-coded attempt among otherwise-generic failures is enough — the more permissive, catching rule', () => {
+      // e.g. robots.txt is public but the sitemap itself is protected.
+      const attempts = [
+        { url: 'https://staging.test/robots.txt', method: 'robots.txt', ok: false, error: 'ENOTFOUND' },
+        { url: 'https://staging.test/sitemap_index.xml', method: 'candidate', ok: false, error: 'HTTP_401' },
+        { url: 'https://staging.test/wp-sitemap.xml', method: 'candidate', ok: false, error: 'HTTP_404' },
+      ];
+      const result = describeSitemapError(new errors.SitemapDiscoveryFailedError(attempts), {
+        side: 'staging',
+        editUrl: '/projects/abc/edit',
+      });
+      assert.match(result.message, /\.htaccess/);
+    });
+
+    test('a 403-coded attempt is treated the same as 401', () => {
+      const attempts = [{ url: 'https://staging.test/sitemap.xml', method: 'candidate', ok: false, error: 'HTTP_403' }];
+      const result = describeSitemapError(new errors.SitemapDiscoveryFailedError(attempts), {
+        side: 'staging',
+        editUrl: '/projects/abc/edit',
+      });
+      assert.match(result.message, /\.htaccess/);
+    });
+
+    test('an auth-coded discovery failure on the LIVE side does not offer an edit link', () => {
+      const attempts = [{ url: 'https://live.test/sitemap.xml', method: 'candidate', ok: false, error: 'HTTP_401' }];
+      const result = describeSitemapError(new errors.SitemapDiscoveryFailedError(attempts), { side: 'live' });
+      assert.doesNotMatch(result.message, /\.htaccess/);
+      assert.equal(result.editUrl, undefined);
+    });
+
+    test('discovery failure with NO auth-coded attempts still gets the generic prompt, not a false credentials claim', () => {
+      const attempts = [
+        { url: 'https://staging.test/robots.txt', method: 'robots.txt', ok: false, error: 'ENOTFOUND' },
+        { url: 'https://staging.test/sitemap_index.xml', method: 'candidate', ok: false, error: 'HTTP_404' },
+      ];
+      const result = describeSitemapError(new errors.SitemapDiscoveryFailedError(attempts), {
+        side: 'staging',
+        editUrl: '/projects/abc/edit',
+      });
+      assert.doesNotMatch(result.message, /\.htaccess/);
+      assert.match(result.message, /paste a sitemap url/i);
+    });
   });
 
   test('every named lib/sitemap error type produces a non-empty message', () => {

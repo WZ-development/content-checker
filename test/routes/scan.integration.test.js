@@ -258,6 +258,36 @@ describe('full comparison — all three group states, grouping, and approximate-
     assert.ok(!titleFetchUrls.some((u) => u.includes('/contact/')), 'must never fetch a title for an on-both URL');
     assert.ok(!titleFetchUrls.some((u) => u.includes('/shared/')), 'must never fetch a title for an on-both URL');
   });
+
+  test('a javascript: <loc> from a compromised site never reaches a rendered href (QA1 Sprint 5 audit, finding A, end to end)', async () => {
+    const routes = {
+      'https://live.test/robots.txt': notFound(),
+      'https://live.test/sitemap_index.xml': {
+        body: `<?xml version="1.0"?><urlset><url><loc>https://live.test/real-page/</loc></url></urlset>`,
+      },
+      'https://live.test/real-page/': html('Real Page'),
+      'https://staging.test/robots.txt': notFound(),
+      'https://staging.test/sitemap_index.xml': {
+        body: `<?xml version="1.0"?><urlset>
+          <url><loc>javascript:alert(document.querySelector('[name=_csrf]').value)</loc></url>
+          <url><loc>https://staging.test/legit/</loc></url>
+        </urlset>`,
+      },
+      'https://staging.test/legit/': html('Legit'),
+    };
+    const { app } = createTestApp({ routes });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent);
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    const res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+    assert.equal(res.status, 200);
+
+    assert.doesNotMatch(res.text, /javascript:/i);
+    assert.doesNotMatch(res.text, /href="[^"]*alert/i);
+    // The legitimate staging-only item still rendered normally.
+    assert.match(res.text, /href="https:\/\/staging\.test\/legit\/"/);
+  });
 });
 
 describe('zero-difference state (requirement 7)', () => {
@@ -330,20 +360,168 @@ describe('truncation warning renders alongside results, never instead of them (r
     assert.match(res.text, /On staging, not yet on live/);
     assert.match(res.text, /only-on-staging-child0/);
   });
+
+  // QA1's Sprint 5 audit, finding C: the warning fired for `truncated`
+  // only — `skipped` and `ambiguous`, both named in requirement 8's
+  // first sentence, were carried all the way to the view and never
+  // rendered. Two demonstrations, reproduced here as regression tests.
+  describe('skipped and ambiguous sitemaps also warn, not just truncation (finding C)', () => {
+    test('a 404 on a staging child sitemap produces a warning, instead of a silent false alarm on the live-only side', async () => {
+      // staging's post-sitemap2.xml 404s. Its content (had it succeeded)
+      // would have matched live's /p2/ — because staging never actually
+      // saw it, /p2/ reads as "on live only" (a false "will be lost"
+      // alarm), with nothing on screen explaining that a staging
+      // sitemap was never read at all.
+      const routes = {
+        'https://live.test/robots.txt': notFound(),
+        'https://live.test/sitemap_index.xml': {
+          body: `<?xml version="1.0"?><urlset><url><loc>https://live.test/p2/</loc></url></urlset>`,
+        },
+        'https://live.test/p2/': html('Page 2'),
+        'https://staging.test/robots.txt': notFound(),
+        'https://staging.test/sitemap_index.xml': {
+          body: `<?xml version="1.0"?><sitemapindex>
+            <sitemap><loc>https://staging.test/post-sitemap.xml</loc></sitemap>
+            <sitemap><loc>https://staging.test/post-sitemap2.xml</loc></sitemap>
+          </sitemapindex>`,
+        },
+        'https://staging.test/post-sitemap.xml': {
+          body: `<?xml version="1.0"?><urlset><url><loc>https://staging.test/other/</loc></url></urlset>`,
+        },
+        'https://staging.test/post-sitemap2.xml': notFound(),
+      };
+      const { app } = createTestApp({ routes });
+      const agent = await loginAgent(app);
+      const id = await createProject(agent);
+      const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+      const res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+      assert.equal(res.status, 200);
+
+      // The false alarm is still there (that part is honest — /p2/
+      // genuinely wasn't seen on staging) ...
+      assert.match(res.text, /p2\//);
+      // ... but now explained, not silent.
+      assert.match(res.text, /could not be read|skipped/i);
+      assert.match(res.text, /post-sitemap2\.xml/);
+    });
+
+    test('an ambiguous sitemap included on both sides produces a note even alongside a zero-difference result', async () => {
+      const routes = {
+        'https://live.test/robots.txt': notFound(),
+        'https://live.test/sitemap_index.xml': {
+          body: `<?xml version="1.0"?><sitemapindex>
+            <sitemap><loc>https://live.test/post-sitemap.xml</loc></sitemap>
+            <sitemap><loc>https://live.test/gallery-sitemap.xml</loc></sitemap>
+          </sitemapindex>`,
+        },
+        'https://live.test/post-sitemap.xml': {
+          body: `<?xml version="1.0"?><urlset><url><loc>https://x.test/shared/</loc></url></urlset>`,
+        },
+        'https://live.test/gallery-sitemap.xml': {
+          body: `<?xml version="1.0"?><urlset><url><loc>https://x.test/gallery/item/</loc></url></urlset>`,
+        },
+        'https://staging.test/robots.txt': notFound(),
+        'https://staging.test/sitemap_index.xml': {
+          body: `<?xml version="1.0"?><sitemapindex>
+            <sitemap><loc>https://staging.test/post-sitemap.xml</loc></sitemap>
+            <sitemap><loc>https://staging.test/gallery-sitemap.xml</loc></sitemap>
+          </sitemapindex>`,
+        },
+        'https://staging.test/post-sitemap.xml': {
+          body: `<?xml version="1.0"?><urlset><url><loc>https://x.test/shared/</loc></url></urlset>`,
+        },
+        'https://staging.test/gallery-sitemap.xml': {
+          body: `<?xml version="1.0"?><urlset><url><loc>https://x.test/gallery/item/</loc></url></urlset>`,
+        },
+      };
+      const { app } = createTestApp({ routes });
+      const agent = await loginAgent(app);
+      const id = await createProject(agent);
+      const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+      const res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+      assert.equal(res.status, 200);
+
+      // Both sides normalize to the same two comparison keys, so this
+      // is a genuine zero-difference result...
+      assert.match(res.text, /No differences found/);
+      // ...but "safe to push" must not stand alone: an unrecognized
+      // sitemap was included on faith on both sides.
+      assert.match(res.text, /didn't match a known naming convention/i);
+      assert.match(res.text, /gallery-sitemap\.xml/);
+    });
+
+    test('excluded-content-type skips do NOT trigger the warning — it fires on every normal site otherwise', async () => {
+      const routes = {
+        'https://live.test/robots.txt': notFound(),
+        'https://live.test/sitemap_index.xml': {
+          body: `<?xml version="1.0"?><sitemapindex>
+            <sitemap><loc>https://live.test/post-sitemap.xml</loc></sitemap>
+            <sitemap><loc>https://live.test/product-sitemap.xml</loc></sitemap>
+          </sitemapindex>`,
+        },
+        'https://live.test/post-sitemap.xml': {
+          body: `<?xml version="1.0"?><urlset><url><loc>https://live.test/only/</loc></url></urlset>`,
+        },
+        // product-sitemap.xml is classified 'exclude' and never fetched
+        // — no route needed, and its absence proves it really wasn't
+        // requested.
+        'https://staging.test/robots.txt': notFound(),
+        'https://staging.test/sitemap_index.xml': {
+          body: `<?xml version="1.0"?><urlset></urlset>`,
+        },
+        'https://live.test/only/': html('Only'),
+      };
+      const { app } = createTestApp({ routes });
+      const agent = await loginAgent(app);
+      const id = await createProject(agent);
+      const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+      const res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+      assert.equal(res.status, 200);
+      assert.doesNotMatch(res.text, /could not be read/i);
+      assert.doesNotMatch(res.text, /product-sitemap/);
+    });
+  });
 });
 
 describe('typed error presentation — staging 401 (requirement 10)', () => {
-  // lib/sitemap's automatic discovery (robots.txt, then each candidate
-  // path) swallows an individual attempt's failure — 401 included —
-  // into a generic "discovery failed" so it can keep trying the next
-  // candidate (see discovery.js's own catch blocks); only a manual
-  // sitemap URL has no fallback to fall through to, so ITS failure
-  // propagates directly as the real typed error. That's not a gap this
-  // sprint owns — it's exactly how Sprint 3 built it, and matches the
-  // realistic two-step flow: a Basic-Auth-protected site fails
-  // automatic discovery generically first, the user pastes its sitemap
-  // URL, and THAT attempt is what surfaces the specific 401 message.
-  test('a 401 on a manually-supplied staging sitemap URL produces the .htaccess message and a working edit-screen link', async () => {
+  // QA1's Sprint 5 audit, finding B: this is the PRIMARY path —
+  // discovery running from the project's own saved staging URL, no
+  // manual sitemap entered — and it's exactly what LiveQA's own
+  // criterion scans ("run a scan against a site whose staging URL
+  // requires Basic Auth with no credentials saved"). Every automatic
+  // attempt (robots.txt, then each candidate path) 401s independently;
+  // discovery.js records each as an attempt and keeps trying the next
+  // one rather than aborting, so this exercises SitemapDiscoveryFailedError
+  // carrying auth-coded attempts, not HttpAuthError directly — see
+  // scanErrorPresentation.js's hasAuthAttempt().
+  test('discovery from the saved staging URL, with no manual sitemap entered, produces the .htaccess message and edit link', async () => {
+    const routes = {
+      'https://live.test/robots.txt': notFound(),
+      'https://live.test/sitemap_index.xml': { body: LIVE_INDEX_XML },
+      'https://live.test/page-sitemap.xml': { body: LIVE_PAGE_XML },
+      'https://live.test/post-sitemap.xml': { body: LIVE_POST_XML },
+      'https://live.test/old-page/': html('Old Page Title'),
+      'https://staging.test/robots.txt': { status: 401 },
+      'https://staging.test/sitemap_index.xml': { status: 401 },
+      'https://staging.test/wp-sitemap.xml': { status: 401 },
+      'https://staging.test/sitemap.xml': { status: 401 },
+    };
+    const { app } = createTestApp({ routes });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent);
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    const res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+    assert.equal(res.status, 200);
+    assert.match(res.text, /\.htaccess/);
+    assert.match(res.text, new RegExp(`href="/projects/${id}/edit"`));
+    assert.doesNotMatch(res.text, /Could not automatically discover a sitemap/);
+  });
+
+  test('a 401 on a manually-supplied staging sitemap URL also produces the .htaccess message and edit link (the direct-propagation path)', async () => {
     const routes = {
       'https://live.test/robots.txt': notFound(),
       'https://live.test/sitemap_index.xml': { body: LIVE_INDEX_XML },
@@ -393,6 +571,35 @@ describe('partial result — one side fails, the other still renders (requiremen
     assert.match(res.text, /about\//);
     assert.match(res.text, /blog\/shared\//);
     assert.match(res.text, /Staging scan failed/i);
+  });
+
+  // QA1 Sprint 5 audit, item E (non-blocking, verified anyway since it's
+  // cheap and directly adjacent to finding B): both sides 401ing must
+  // still give staging its specific credentials message, independent of
+  // whatever the live side's (separate, correct) wording says.
+  test('a 401 on BOTH sides still produces the staging-specific credentials message, not the generic live wording for both', async () => {
+    const routes = {
+      'https://live.test/robots.txt': { status: 401 },
+      'https://live.test/sitemap_index.xml': { status: 401 },
+      'https://live.test/wp-sitemap.xml': { status: 401 },
+      'https://live.test/sitemap.xml': { status: 401 },
+      'https://staging.test/robots.txt': { status: 401 },
+      'https://staging.test/sitemap_index.xml': { status: 401 },
+      'https://staging.test/wp-sitemap.xml': { status: 401 },
+      'https://staging.test/sitemap.xml': { status: 401 },
+    };
+    const { app } = createTestApp({ routes });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent);
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    const res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+    assert.equal(res.status, 200);
+    assert.match(res.text, /\.htaccess/);
+    assert.match(res.text, new RegExp(`href="/projects/${id}/edit"`));
+    // The live-side wording is separate and must not ALSO claim
+    // .htaccess credentials — there's no live credential field.
+    assert.match(res.text, /This live site rejected requests with an authentication error/);
   });
 });
 
