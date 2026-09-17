@@ -17,7 +17,7 @@ const { createProjectsRouter } = require('./routes/projects');
 const { createScanRouter } = require('./routes/scan');
 const { openDatabase } = require('./db/database');
 const { createProjectsRepository } = require('./db/projectsRepository');
-const { createPinnedFetch, wrapFetchWithOutboundToken } = require('../lib/net/pinnedFetch');
+const { createPinnedFetch } = require('../lib/net/pinnedFetch');
 
 const DEFAULT_DB_PATH = path.join(__dirname, '..', 'data', 'content-checker.db');
 
@@ -36,16 +36,24 @@ const DEFAULT_DB_PATH = path.join(__dirname, '..', 'data', 'content-checker.db')
  * .js) instead of the real network. Left unset, createPinnedFetch()
  * builds the real connection-pinned pair — sprint 5, requirement 14 —
  * exactly ONCE per app instance, right here, and the identical pair is
- * handed to the scan router, which passes it unchanged into both
+ * handed to the scan router, which forwards it (further wrapped
+ * per-request with the outbound token — see below) into both
  * lib/sitemap's crawler and lib/compare's title fetcher. No other
  * module ever constructs its own fetch implementation.
  *
- * Sprint 7, requirement 1: whichever fetchImpl this ends up using (real
- * pinned, or a test's injected fake) is then wrapped exactly once with
- * wrapFetchWithOutboundToken — deliberately AFTER the test-injection
- * decision above, not folded into createPinnedFetch itself, so a test
- * that injects its own fake fetchImpl (to stay off the real network)
- * still exercises the real token-injection path, not a bypassed one.
+ * Sprint 7, requirement 1, THEN its fix-loop (QA1 round 1 finding A): the
+ * outbound token used to be wrapped exactly once, right here, around
+ * whichever fetchImpl this app instance ends up using — but that wrapping
+ * has no way to know which origins are safe to send the token to, because
+ * this function runs once per APP INSTANCE, before any particular project
+ * (and therefore its live/staging origins) is even known. Scoping the
+ * token to a project's own origins therefore has to happen per SCAN
+ * REQUEST, not per app instance — see src/routes/scan.js, which now does
+ * the actual wrapFetchWithOutboundToken call. This function still builds
+ * the connection-pinned pair exactly ONCE per app instance (sprint 5,
+ * requirement 14) and hands the UNWRAPPED fetchImpl/dnsLookup, plus the
+ * raw `config.outboundToken`, to the scan router — scan.js is the only
+ * other place that ever sees the real token value.
  */
 function createApp(config, { repository, fetchImpl, dnsLookup } = {}) {
   const app = express();
@@ -57,13 +65,9 @@ function createApp(config, { repository, fetchImpl, dnsLookup } = {}) {
   // supplying a fake fetch almost always wants its own dnsLookup too
   // (see test/sitemap/testHarness.js), but falls back to the real
   // resolver if it didn't provide one, rather than silently pinning.
-  const baseFetch = fetchImpl
+  const pinnedFetch = fetchImpl
     ? { fetchImpl, dnsLookup: dnsLookup || dns.promises.lookup }
     : createPinnedFetch({ dnsLookup });
-  const pinnedFetch = {
-    fetchImpl: wrapFetchWithOutboundToken(baseFetch.fetchImpl, config.outboundToken),
-    dnsLookup: baseFetch.dnsLookup,
-  };
 
   app.set('trust proxy', 1);
   app.set('view engine', 'ejs');
@@ -128,7 +132,7 @@ function createApp(config, { repository, fetchImpl, dnsLookup } = {}) {
       repository: projectsRepository,
       fetchImpl: pinnedFetch.fetchImpl,
       dnsLookup: pinnedFetch.dnsLookup,
-      outboundTokenConfigured: Boolean(config.outboundToken),
+      outboundToken: config.outboundToken,
     })
   );
 

@@ -1060,3 +1060,160 @@ describe('outbound identification token (sprint 7, requirements 1/2)', () => {
     });
   });
 });
+
+describe('Sprint 7 fix-loop — secrets scoped to the project\'s own origins (QA1 round 1 findings A/B)', () => {
+  const TOKEN = 'b'.repeat(40);
+  const STAGING_USER = 'dev';
+  const STAGING_PASSWORD = 'hunter2';
+
+  function minimalUrlset(locs) {
+    return `<?xml version="1.0"?><urlset>${locs.map((loc) => `<url><loc>${loc}</loc></url>`).join('')}</urlset>`;
+  }
+
+  // Every test in this block needs at least one host beyond live.test/
+  // staging.test resolvable — the foreign hosts QA1's exploit named.
+  const DNS_WITH_FOREIGN_HOSTS = createFakeDnsLookup({
+    'live.test': '93.184.216.34',
+    'staging.test': '93.184.216.35',
+    'attacker.example': '93.184.216.36',
+    'cdn.thirdparty.example': '93.184.216.37',
+  });
+
+  function byUrl(fetchImpl, needle) {
+    return fetchImpl.log.find((e) => e.url.includes(needle));
+  }
+
+  function assertNoSecret(entry, label) {
+    assert.ok(entry, `expected a logged request matching ${label}`);
+    assert.equal(entry.headers[OUTBOUND_TOKEN_HEADER_NAME], undefined, `${label}: token must not be present`);
+    assert.equal(entry.headers.Authorization, undefined, `${label}: Authorization must not be present`);
+  }
+
+  test('a third-party <loc> on the staging side receives neither the token nor the staging credential (QA1 finding A/B, exploit (a))', async () => {
+    const routes = {
+      'https://live.test/robots.txt': notFound(),
+      'https://live.test/sitemap_index.xml': { body: minimalUrlset(['https://live.test/about/']) },
+      'https://live.test/about/': html('About'),
+      'https://staging.test/robots.txt': notFound(),
+      'https://staging.test/sitemap_index.xml': { body: minimalUrlset(['https://attacker.example/harvest/']) },
+      'https://attacker.example/harvest/': html('Harvested'),
+    };
+    const { app, fetchImpl } = createTestApp({
+      routes,
+      dnsLookup: DNS_WITH_FOREIGN_HOSTS,
+      configOverrides: { outboundToken: TOKEN },
+    });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent, { basicAuthUsername: STAGING_USER, basicAuthPassword: STAGING_PASSWORD });
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    const res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+    assert.equal(res.status, 200);
+
+    // The exploit: a title fetch to a host named by the staging sitemap's
+    // own content must carry neither secret.
+    assertNoSecret(byUrl(fetchImpl, 'attacker.example'), 'the third-party title fetch');
+
+    // Positive control: a genuine staging-origin request in the SAME scan
+    // still carries both — proving the block above is origin-scoping, not
+    // every secret having gone missing.
+    const stagingRequest = byUrl(fetchImpl, 'staging.test/sitemap_index.xml');
+    assert.equal(stagingRequest.headers[OUTBOUND_TOKEN_HEADER_NAME], TOKEN);
+    assert.ok(stagingRequest.headers.Authorization);
+  });
+
+  test('a cross-host redirect off the project\'s origins carries neither secret on that hop (QA1 finding A/B, exploit (b))', async () => {
+    const routes = {
+      'https://live.test/robots.txt': notFound(),
+      'https://live.test/sitemap_index.xml': notFound(),
+      'https://live.test/wp-sitemap.xml': notFound(),
+      'https://live.test/sitemap.xml': notFound(),
+      'https://staging.test/robots.txt': notFound(),
+      'https://staging.test/sitemap_index.xml': {
+        status: 302,
+        headers: { location: 'https://cdn.thirdparty.example/sitemap.xml' },
+      },
+      'https://cdn.thirdparty.example/sitemap.xml': { body: minimalUrlset([]) },
+    };
+    const { app, fetchImpl } = createTestApp({
+      routes,
+      dnsLookup: DNS_WITH_FOREIGN_HOSTS,
+      configOverrides: { outboundToken: TOKEN },
+    });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent, { basicAuthUsername: STAGING_USER, basicAuthPassword: STAGING_PASSWORD });
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+
+    assertNoSecret(byUrl(fetchImpl, 'cdn.thirdparty.example'), 'the cross-host redirect hop');
+
+    const firstHop = byUrl(fetchImpl, 'staging.test/sitemap_index.xml');
+    assert.equal(firstHop.headers[OUTBOUND_TOKEN_HEADER_NAME], TOKEN, 'the first hop (staging origin) still carries the token');
+    assert.ok(firstHop.headers.Authorization, 'the first hop (staging origin) still carries Authorization');
+  });
+
+  test('a same-project cross-side redirect (staging -> live) carries the token but NOT the staging credential (one mechanism, two different scopes)', async () => {
+    const routes = {
+      'https://live.test/robots.txt': notFound(),
+      'https://live.test/sitemap_index.xml': notFound(),
+      'https://live.test/wp-sitemap.xml': notFound(),
+      'https://live.test/sitemap.xml': notFound(),
+      'https://staging.test/robots.txt': notFound(),
+      'https://staging.test/sitemap_index.xml': {
+        status: 302,
+        headers: { location: 'https://live.test/staging-sitemap-mirror.xml' },
+      },
+      'https://live.test/staging-sitemap-mirror.xml': { body: minimalUrlset([]) },
+    };
+    const { app, fetchImpl } = createTestApp({
+      routes,
+      configOverrides: { outboundToken: TOKEN },
+    });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent, { basicAuthUsername: STAGING_USER, basicAuthPassword: STAGING_PASSWORD });
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+
+    const redirectedHop = byUrl(fetchImpl, 'staging-sitemap-mirror.xml');
+    assert.ok(redirectedHop, 'expected the redirected-to live.test hop to have been fetched');
+    assert.equal(
+      redirectedHop.headers[OUTBOUND_TOKEN_HEADER_NAME],
+      TOKEN,
+      'live.test is one of the project\'s own origins — the token IS sent'
+    );
+    assert.equal(
+      redirectedHop.headers.Authorization,
+      undefined,
+      'live.test is NOT the staging origin — Authorization must NOT follow the token here'
+    );
+  });
+
+  test('a robots.txt Sitemap: directive naming a foreign host receives no Authorization (QA1\'s explicitly-requested case)', async () => {
+    const routes = {
+      'https://live.test/robots.txt': notFound(),
+      'https://live.test/sitemap_index.xml': notFound(),
+      'https://live.test/wp-sitemap.xml': notFound(),
+      'https://live.test/sitemap.xml': notFound(),
+      'https://staging.test/robots.txt': { body: 'Sitemap: https://attacker.example/foreign-sitemap.xml' },
+      'https://attacker.example/foreign-sitemap.xml': { body: minimalUrlset([]) },
+    };
+    const { app, fetchImpl } = createTestApp({
+      routes,
+      dnsLookup: DNS_WITH_FOREIGN_HOSTS,
+      configOverrides: { outboundToken: TOKEN },
+    });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent, { basicAuthUsername: STAGING_USER, basicAuthPassword: STAGING_PASSWORD });
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+
+    assertNoSecret(byUrl(fetchImpl, 'attacker.example'), "the robots.txt-declared foreign sitemap fetch");
+
+    const robotsRequest = byUrl(fetchImpl, 'staging.test/robots.txt');
+    assert.equal(robotsRequest.headers[OUTBOUND_TOKEN_HEADER_NAME], TOKEN);
+    assert.ok(robotsRequest.headers.Authorization);
+  });
+});

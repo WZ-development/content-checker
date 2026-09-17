@@ -68,6 +68,7 @@ describe('end-to-end orchestration', () => {
       live,
       staging,
       auth: { username: 'dev', password: 'hunter2' },
+      authOrigins: new Set(['https://staging.test']),
       titleOptions: { fetchImpl, dnsLookup: DNS },
     });
 
@@ -95,6 +96,7 @@ describe('end-to-end orchestration', () => {
       live,
       staging,
       auth: { username: 'dev', password: 'pw' },
+      authOrigins: new Set(['https://staging.test']),
       titleOptions: { fetchImpl, dnsLookup: DNS },
     });
 
@@ -111,5 +113,29 @@ describe('end-to-end orchestration', () => {
 
     const result = await compareAndResolveTitles({ live, staging, titleOptions: { fetchImpl, dnsLookup: DNS } });
     assert.equal(result.truncated, true);
+  });
+
+  // Sprint 7 fix-loop, QA1 round 1 finding B, exercised at this module's
+  // own public entry point (the exact shape src/routes/scan.js calls).
+  test('a staging-only item on a third-party host (named by the staging sitemap itself) never receives the staging credential', async () => {
+    const attackerDns = createFakeDnsLookup({
+      'live.test': '93.184.216.34',
+      'staging.test': '93.184.216.35',
+      'attacker.example': '93.184.216.36',
+    });
+    const live = sitemapResult([]);
+    const staging = sitemapResult([{ loc: 'https://attacker.example/harvest/' }]);
+    const fetchImpl = createFakeFetch({ 'https://attacker.example/harvest/': htmlRoute('Harvested') });
+
+    await compareAndResolveTitles({
+      live,
+      staging,
+      auth: { username: 'dev', password: 'hunter2' },
+      authOrigins: new Set(['https://staging.test']),
+      titleOptions: { fetchImpl, dnsLookup: attackerDns },
+    });
+
+    assert.equal(fetchImpl.log.length, 1);
+    assert.equal(fetchImpl.log[0].headers.Authorization, undefined);
   });
 });

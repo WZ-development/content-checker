@@ -30,6 +30,7 @@ function buildCtx(routes, overrides = {}) {
     dnsLookup: DNS,
     timeoutMs: overrides.timeoutMs || 1000,
     auth: overrides.auth,
+    authOrigins: overrides.authOrigins,
     userAgent: 'TestBot/1.0',
     maxRedirects: 5,
     budgetSignal: budgetController.signal,
@@ -363,7 +364,10 @@ describe('crawlSitemapTree', () => {
 
   test('sends Authorization on child-sitemap requests, not only the root', async () => {
     const routes = fixtureRoutes(['page-sitemap.xml', 'post-sitemap.xml']);
-    const { ctx, log } = buildCtx(routes, { auth: { username: 'dev', password: 'pw' } });
+    const { ctx, log } = buildCtx(routes, {
+      auth: { username: 'dev', password: 'pw' },
+      authOrigins: new Set(['https://example.test']),
+    });
     const parsedDoc = parseSitemapXml(loadFixture('sitemap-index-basic.xml'));
     await crawlSitemapTree([{ url: 'https://example.test/sitemap-index-basic.xml', parsedDoc }], ctx);
 

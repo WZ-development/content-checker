@@ -52,6 +52,7 @@ describe('requirement 12 — reuses Sprint 3\'s HTTP layer, builds no second one
       fetchImpl,
       dnsLookup: DNS,
       auth: { username: 'dev', password: 'hunter2' },
+      authOrigins: new Set(['https://staging.test']),
     });
     const expected = `Basic ${Buffer.from('dev:hunter2').toString('base64')}`;
     assert.equal(fetchImpl.log[0].headers.Authorization, expected);
@@ -65,6 +66,7 @@ describe('requirement 7 — Basic Auth respected for staging-side URLs only', ()
       fetchImpl,
       dnsLookup: DNS,
       auth: { username: 'dev', password: 'pw' },
+      authOrigins: new Set(['https://staging.test']),
     });
     assert.ok(fetchImpl.log[0].headers.Authorization);
   });
@@ -75,6 +77,29 @@ describe('requirement 7 — Basic Auth respected for staging-side URLs only', ()
       fetchImpl,
       dnsLookup: DNS,
       auth: { username: 'dev', password: 'pw' },
+      authOrigins: new Set(['https://staging.test']),
+    });
+    assert.equal(fetchImpl.log[0].headers.Authorization, undefined);
+  });
+});
+
+describe('Sprint 7 fix-loop, QA1 round 1 finding B — a staging item on a THIRD-PARTY host never gets the credential', () => {
+  test('a "staging" item whose URL is on a host outside authOrigins does not receive Authorization', async () => {
+    // Exactly QA1's demonstrated exploit: a staging sitemap can list a
+    // <loc> on any host it likes. Before this fix, resolveTitles's own
+    // per-item guardedFetch call trusted that URL's own origin, so the
+    // credential went straight to the attacker-named host.
+    const dnsWithAttacker = createFakeDnsLookup({
+      'live.test': '93.184.216.34',
+      'staging.test': '93.184.216.35',
+      'attacker.example': '93.184.216.36',
+    });
+    const fetchImpl = createFakeFetch({ 'https://attacker.example/harvest/': htmlRoute('Harvested') });
+    await resolveTitles([{ url: 'https://attacker.example/harvest/', side: 'staging' }], {
+      fetchImpl,
+      dnsLookup: dnsWithAttacker,
+      auth: { username: 'dev', password: 'pw' },
+      authOrigins: new Set(['https://staging.test']),
     });
     assert.equal(fetchImpl.log[0].headers.Authorization, undefined);
   });

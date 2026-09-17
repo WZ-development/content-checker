@@ -7,7 +7,9 @@ const { normalizeAndValidateUrl } = require('../lib/urlValidation');
 const { describeSitemapError } = require('../lib/scanErrorPresentation');
 const { groupBySourceType, buildRawSideItems, summarizeCompleteness } = require('../lib/scanResultPresentation');
 const { discoverAndParseSitemap } = require('../../lib/sitemap/index');
+const { originOf } = require('../../lib/sitemap/originScope');
 const { compareAndResolveTitles } = require('../../lib/compare/index');
+const { wrapFetchWithOutboundToken } = require('../../lib/net/pinnedFetch');
 
 function renderNotFound(res) {
   res.status(404).render('error', {
@@ -31,6 +33,7 @@ async function resolveSide({
   baseUrl,
   manualUrlRaw,
   auth,
+  authOrigins,
   side,
   editUrl,
   fetchImpl,
@@ -51,6 +54,7 @@ async function resolveSide({
       baseUrl: manualSitemapUrl ? undefined : baseUrl,
       manualSitemapUrl,
       auth,
+      authOrigins,
       fetchImpl,
       dnsLookup,
     });
@@ -63,26 +67,39 @@ async function resolveSide({
 /**
  * Builds the scan router. `fetchImpl`/`dnsLookup` are the ONE pinned
  * pair constructed once in src/app.js (requirement 14) — this router
- * never constructs its own, and passes the identical pair into both
- * lib/sitemap's discoverAndParseSitemap AND lib/compare's
+ * never constructs its own, and passes them (further wrapped, see below)
+ * into both lib/sitemap's discoverAndParseSitemap AND lib/compare's
  * compareAndResolveTitles (which forwards it to resolveTitles).
  *
- * `outboundTokenConfigured` (sprint 7, requirement 7) is a plain boolean
- * — never the token itself — forwarded from src/app.js's
- * Boolean(config.outboundToken) straight through to
- * describeSitemapError, purely so a CDN-challenge message can lead with
- * "no token configured yet" when that's true. This route never reads or
- * forwards the actual token value; wrapFetchWithOutboundToken
- * (lib/net/pinnedFetch.js) is the only place that touches it.
+ * `outboundToken` (sprint 7, requirement 1) is the RAW secret value from
+ * src/app.js's `config.outboundToken` — this route is one of only three
+ * places in the codebase that ever touches it (config.js parses it,
+ * app.js holds it, this file uses it). It exists here, rather than
+ * app.js wrapping fetchImpl once and handing this route the result
+ * (Sprint 7's original design), because of QA1's round-1 fix-loop finding
+ * A: the token must only be sent to the SCANNED PROJECT's own live/
+ * staging origins, and app.js runs once per app instance — before any
+ * particular project, and therefore its origins, exist. So the actual
+ * wrapFetchWithOutboundToken() call happens HERE, per request, freshly
+ * scoped to `project.liveUrl`/`project.stagingUrl`'s origins each time.
+ * Every other consumer of this route (describeSitemapError included)
+ * only ever sees `outboundTokenConfigured`, a plain boolean, computed
+ * below.
  *
  * Requirement 16, the credential boundary: `repository
  * .getDecryptedBasicAuthPassword()` is called ONLY here, in the route.
  * The plaintext `{username, password}` it produces is handed to
  * lib/sitemap and lib/compare as a plain option — neither module
  * imports the repository or the decrypt helper (verified structurally
- * in their own Sprint 4 tests).
+ * in their own Sprint 4 tests). QA1's round-1 fix-loop finding B: that
+ * password is now ALSO scoped to `authOrigins` (the staging origin
+ * alone, computed below from `project.stagingUrl` — never from a URL
+ * discovered inside fetched content) before being handed down, closing
+ * the same class of leak the token had, for the credential that was
+ * already there.
  */
-function createScanRouter({ urlHelper, repository, fetchImpl, dnsLookup, outboundTokenConfigured }) {
+function createScanRouter({ urlHelper, repository, fetchImpl, dnsLookup, outboundToken }) {
+  const outboundTokenConfigured = Boolean(outboundToken);
   const router = express.Router();
 
   // Sprint 5, requirement 3: the double-submit guard must be
@@ -142,12 +159,26 @@ function createScanRouter({ urlHelper, repository, fetchImpl, dnsLookup, outboun
           ? { username: project.basicAuthUsername, password: repository.getDecryptedBasicAuthPassword(project.id) }
           : undefined;
 
+        // QA1 round-1 fix-loop findings A and B: both secrets this route
+        // hands downstream (the outbound token, the staging Basic-Auth
+        // password) are scoped to origins computed from THIS project's
+        // own configuration — never from a manually-typed sitemap URL,
+        // and never from anything discovered inside fetched content.
+        const liveOrigin = originOf(project.liveUrl);
+        const stagingOrigin = originOf(project.stagingUrl);
+        const authOrigins = new Set([stagingOrigin]);
+        const scopedFetchImpl = wrapFetchWithOutboundToken(
+          fetchImpl,
+          outboundToken,
+          new Set([liveOrigin, stagingOrigin])
+        );
+
         const [live, staging] = await Promise.all([
           resolveSide({
             baseUrl: project.liveUrl,
             manualUrlRaw: manualLiveSitemapUrl,
             side: 'live',
-            fetchImpl,
+            fetchImpl: scopedFetchImpl,
             dnsLookup,
             outboundTokenConfigured,
           }),
@@ -155,9 +186,10 @@ function createScanRouter({ urlHelper, repository, fetchImpl, dnsLookup, outboun
             baseUrl: project.stagingUrl,
             manualUrlRaw: manualStagingSitemapUrl,
             auth,
+            authOrigins,
             side: 'staging',
             editUrl,
-            fetchImpl,
+            fetchImpl: scopedFetchImpl,
             dnsLookup,
             outboundTokenConfigured,
           }),
@@ -169,7 +201,8 @@ function createScanRouter({ urlHelper, repository, fetchImpl, dnsLookup, outboun
             live: live.result,
             staging: staging.result,
             auth,
-            titleOptions: { fetchImpl, dnsLookup },
+            authOrigins,
+            titleOptions: { fetchImpl: scopedFetchImpl, dnsLookup },
           });
           scanResult = {
             status: 'success',

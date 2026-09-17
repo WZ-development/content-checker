@@ -26,12 +26,25 @@ unsafe: it keys the rule on a per-deployment secret value instead.
 
 ## The rule
 
-Content Checker sends a header named `X-ContentCheck-Token` on every
-outbound request when `CONTENTCHECK_OUTBOUND_TOKEN` is configured for
-that deployment (generate one with `npm run generate-outbound-token`;
-see `.env.example`). That header's value is a random secret unique to
-your deployment — unlike a User-Agent string, an attacker has no way to
-learn or guess it.
+Content Checker sends a header named `X-ContentCheck-Token` on outbound
+requests to this project's own configured live/staging hosts when
+`CONTENTCHECK_OUTBOUND_TOKEN` is configured for that deployment (generate
+one with `npm run generate-outbound-token`; see `.env.example`) — never
+to a third-party host merely referenced inside a scanned site's content
+(a sitemap `<loc>`, a redirect, a robots.txt directive); the tool scopes
+it to the project's own origins so a compromised or malicious scanned
+site cannot use its own content to harvest the token for a host it
+doesn't otherwise touch.
+
+That header's value is a random secret unique to your deployment.
+Unlike a User-Agent string, someone who does not control one of the
+sites you scan has no way to learn or guess it — but anyone who DOES
+control a site you scan (a compromised WordPress install is routine)
+necessarily sees it, the same way any bot-identification header is
+visible to whatever it's sent to. That is exactly why the post-deploy
+IP-tightening below is not optional, not a nice-to-have: it's what stops
+a captured token from being replayed from a different source once one
+client site is compromised.
 
 Add a Cloudflare WAF custom rule with:
 

@@ -26,6 +26,11 @@ function makeGuardedFetch(routes, overrides = {}) {
     dnsLookup,
     timeoutMs: overrides.timeoutMs || 1000,
     auth: overrides.auth,
+    // Sprint 7 fix-loop (QA1 round 1 finding B): authOrigins must now be
+    // supplied explicitly by every caller — see httpClient.js's doc
+    // comment. Each auth-using test below passes the origin it actually
+    // means to trust, rather than relying on any implicit default here.
+    authOrigins: overrides.authOrigins,
     userAgent: 'TestBot/1.0',
     maxRedirects: overrides.maxRedirects ?? 5,
   });
@@ -46,14 +51,33 @@ describe('createGuardedFetch', () => {
     assert.equal(log[0].headers['User-Agent'], 'TestBot/1.0');
   });
 
-  test('sends Authorization: Basic when auth is supplied', async () => {
+  test('sends Authorization: Basic when auth is supplied and the URL is within authOrigins', async () => {
     const { guardedFetch, log } = makeGuardedFetch(
       { 'https://good.test/x.xml': { body: 'ok' } },
-      { auth: { username: 'dev', password: 'hunter2' } }
+      { auth: { username: 'dev', password: 'hunter2' }, authOrigins: new Set(['https://good.test']) }
     );
     await guardedFetch('https://good.test/x.xml');
     const expected = `Basic ${Buffer.from('dev:hunter2').toString('base64')}`;
     assert.equal(log[0].headers.Authorization, expected);
+  });
+
+  test('Sprint 7 fix-loop, QA1 finding B: does NOT send Authorization when the URL is outside authOrigins, even though auth is supplied', async () => {
+    // This is the actual vulnerability QA1 demonstrated: a guardedFetch
+    // call whose FIRST/only URL is not the trusted origin — exactly what
+    // happens when a title fetch or child-sitemap fetch is handed a URL
+    // discovered inside untrusted content. authOrigins is now the only
+    // thing that can authorize sending the credential, never targetUrl's
+    // own origin.
+    const { guardedFetch, log } = makeGuardedFetch(
+      { 'https://attacker.example/harvest': { body: 'ok' } },
+      {
+        auth: { username: 'dev', password: 'hunter2' },
+        authOrigins: new Set(['https://good.test']),
+        dnsMap: { ...PUBLIC_DNS, 'attacker.example': '93.184.216.36' },
+      }
+    );
+    await guardedFetch('https://attacker.example/harvest');
+    assert.equal(log[0].headers.Authorization, undefined);
   });
 
   test('does not send Authorization when auth is not supplied', async () => {
@@ -220,7 +244,7 @@ describe('createGuardedFetch', () => {
           'https://good.test/old.xml': { status: 302, headers: { location: 'https://good.test/new.xml' } },
           'https://good.test/new.xml': { body: 'ok' },
         },
-        { auth: { username: 'dev', password: 'pw' } }
+        { auth: { username: 'dev', password: 'pw' }, authOrigins: new Set(['https://good.test']) }
       );
       await guardedFetch('https://good.test/old.xml');
       assert.equal(log.length, 2);
@@ -239,7 +263,7 @@ describe('createGuardedFetch', () => {
           'https://good.test/old.xml': { status: 302, headers: { location: 'http://good.test/new.xml' } },
           'http://good.test/new.xml': { body: 'ok' },
         },
-        { auth: { username: 'dev', password: 'pw' } }
+        { auth: { username: 'dev', password: 'pw' }, authOrigins: new Set(['https://good.test']) }
       );
       await guardedFetch('https://good.test/old.xml');
       assert.equal(log.length, 2);
@@ -257,9 +281,10 @@ describe('createGuardedFetch', () => {
           'http://good.test/old.xml': { status: 302, headers: { location: 'https://good.test:8443/new.xml' } },
           'https://good.test:8443/new.xml': { body: 'ok' },
         },
-        { auth: { username: 'dev', password: 'pw' } }
+        { auth: { username: 'dev', password: 'pw' }, authOrigins: new Set(['http://good.test']) }
       );
       await guardedFetch('http://good.test/old.xml');
+      assert.ok(log[0].headers.Authorization, 'first request (http, matching authOrigins) should carry auth');
       assert.equal(log[1].headers.Authorization, undefined, 'a port change must also read as a different origin');
     });
 
@@ -269,7 +294,7 @@ describe('createGuardedFetch', () => {
           'https://good.test/old.xml': { status: 302, headers: { location: 'https://other.test/new.xml' } },
           'https://other.test/new.xml': { body: 'ok' },
         },
-        { auth: { username: 'dev', password: 'pw' } }
+        { auth: { username: 'dev', password: 'pw' }, authOrigins: new Set(['https://good.test']) }
       );
       await guardedFetch('https://good.test/old.xml');
       assert.ok(log[0].headers.Authorization, 'first request should carry auth');
