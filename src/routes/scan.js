@@ -27,7 +27,16 @@ function renderNotFound(res) {
  * `{ ok: false, error }`, so Promise.allSettled isn't even needed at
  * this layer; the caller runs both sides with Promise.all over this.
  */
-async function resolveSide({ baseUrl, manualUrlRaw, auth, side, editUrl, fetchImpl, dnsLookup }) {
+async function resolveSide({
+  baseUrl,
+  manualUrlRaw,
+  auth,
+  side,
+  editUrl,
+  fetchImpl,
+  dnsLookup,
+  outboundTokenConfigured,
+}) {
   let manualSitemapUrl;
   if (manualUrlRaw) {
     const validated = await normalizeAndValidateUrl(manualUrlRaw);
@@ -47,7 +56,7 @@ async function resolveSide({ baseUrl, manualUrlRaw, auth, side, editUrl, fetchIm
     });
     return { ok: true, result };
   } catch (err) {
-    return { ok: false, error: describeSitemapError(err, { side, editUrl }) };
+    return { ok: false, error: describeSitemapError(err, { side, editUrl, outboundTokenConfigured }) };
   }
 }
 
@@ -58,6 +67,14 @@ async function resolveSide({ baseUrl, manualUrlRaw, auth, side, editUrl, fetchIm
  * lib/sitemap's discoverAndParseSitemap AND lib/compare's
  * compareAndResolveTitles (which forwards it to resolveTitles).
  *
+ * `outboundTokenConfigured` (sprint 7, requirement 7) is a plain boolean
+ * — never the token itself — forwarded from src/app.js's
+ * Boolean(config.outboundToken) straight through to
+ * describeSitemapError, purely so a CDN-challenge message can lead with
+ * "no token configured yet" when that's true. This route never reads or
+ * forwards the actual token value; wrapFetchWithOutboundToken
+ * (lib/net/pinnedFetch.js) is the only place that touches it.
+ *
  * Requirement 16, the credential boundary: `repository
  * .getDecryptedBasicAuthPassword()` is called ONLY here, in the route.
  * The plaintext `{username, password}` it produces is handed to
@@ -65,7 +82,7 @@ async function resolveSide({ baseUrl, manualUrlRaw, auth, side, editUrl, fetchIm
  * imports the repository or the decrypt helper (verified structurally
  * in their own Sprint 4 tests).
  */
-function createScanRouter({ urlHelper, repository, fetchImpl, dnsLookup }) {
+function createScanRouter({ urlHelper, repository, fetchImpl, dnsLookup, outboundTokenConfigured }) {
   const router = express.Router();
 
   // Sprint 5, requirement 3: the double-submit guard must be
@@ -132,6 +149,7 @@ function createScanRouter({ urlHelper, repository, fetchImpl, dnsLookup }) {
             side: 'live',
             fetchImpl,
             dnsLookup,
+            outboundTokenConfigured,
           }),
           resolveSide({
             baseUrl: project.stagingUrl,
@@ -141,6 +159,7 @@ function createScanRouter({ urlHelper, repository, fetchImpl, dnsLookup }) {
             editUrl,
             fetchImpl,
             dnsLookup,
+            outboundTokenConfigured,
           }),
         ]);
 

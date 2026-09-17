@@ -5,7 +5,13 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 
 const { Agent, fetch: undiciFetch } = require('undici');
-const { createPinnedFetch, resolveSafeAddresses, SSRF_BLOCKED_CODE } = require('../../lib/net/pinnedFetch');
+const {
+  createPinnedFetch,
+  resolveSafeAddresses,
+  mergeOutboundTokenHeader,
+  SSRF_BLOCKED_CODE,
+  OUTBOUND_TOKEN_HEADER_NAME,
+} = require('../../lib/net/pinnedFetch');
 
 function withTestServer(handler) {
   return new Promise((resolve) => {
@@ -138,5 +144,78 @@ describe('createPinnedFetch', () => {
       );
       assert.equal(callCount, 2, 'expected exactly one pre-check call plus one connect-time call');
     });
+  });
+});
+
+describe('mergeOutboundTokenHeader (sprint 7, requirement 1/2)', () => {
+  test('adds the header under the exact exported name when a token is configured', () => {
+    const headers = mergeOutboundTokenHeader({ 'User-Agent': 'TestBot/1.0' }, 'a-real-token-value');
+    assert.equal(headers[OUTBOUND_TOKEN_HEADER_NAME], 'a-real-token-value');
+    assert.equal(headers['User-Agent'], 'TestBot/1.0', 'existing headers must survive untouched');
+  });
+
+  test('does not mutate the headers object passed in', () => {
+    const original = { 'User-Agent': 'TestBot/1.0' };
+    mergeOutboundTokenHeader(original, 'a-real-token-value');
+    assert.deepEqual(original, { 'User-Agent': 'TestBot/1.0' });
+  });
+
+  test('works when no base headers were supplied at all', () => {
+    const headers = mergeOutboundTokenHeader(undefined, 'a-real-token-value');
+    assert.equal(headers[OUTBOUND_TOKEN_HEADER_NAME], 'a-real-token-value');
+  });
+
+  test('requirement 2: omits the header entirely (returns baseHeaders unchanged) when no token is configured', () => {
+    const base = { 'User-Agent': 'TestBot/1.0' };
+    const headers = mergeOutboundTokenHeader(base, undefined);
+    assert.equal(headers, base, 'must be the SAME object, not a copy with the header simply absent');
+    assert.ok(!(OUTBOUND_TOKEN_HEADER_NAME in headers));
+  });
+
+  test('omits the header for an empty-string token too', () => {
+    const headers = mergeOutboundTokenHeader({ 'User-Agent': 'TestBot/1.0' }, '');
+    assert.ok(!(OUTBOUND_TOKEN_HEADER_NAME in headers));
+  });
+});
+
+describe('the outbound token header reaches a real request (sprint 7, requirement 1, end to end)', () => {
+  test('a request built the same way createPinnedFetch\'s fetchImpl builds one carries the header', async () => {
+    // Same reasoning as the Host-header mechanism test above: every
+    // real bindable local address is itself in the SSRF blocklist
+    // (correctly), so this proves the wiring — mergeOutboundTokenHeader
+    // (the REAL exported function, not a re-implementation) feeding
+    // into undiciFetch via a trivial-lookup Agent — actually lands the
+    // header on the wire, without needing to reach past the filter.
+    const { port, close } = await withTestServer((req, res) => {
+      res.end(String(req.headers['x-contentcheck-token']));
+    });
+    try {
+      const agent = new Agent({
+        connect: { lookup: (hostname, options, callback) => callback(null, [{ address: '127.0.0.1', family: 4 }]) },
+      });
+      const headers = mergeOutboundTokenHeader({ 'User-Agent': 'TestBot/1.0' }, 'the-real-token');
+      const res = await undiciFetch(`http://token-test.invalid:${port}/`, { headers, dispatcher: agent });
+      const text = await res.text();
+      assert.equal(text, 'the-real-token');
+    } finally {
+      await close();
+    }
+  });
+
+  test('no header reaches the server when no token is configured', async () => {
+    const { port, close } = await withTestServer((req, res) => {
+      res.end(JSON.stringify('x-contentcheck-token' in req.headers));
+    });
+    try {
+      const agent = new Agent({
+        connect: { lookup: (hostname, options, callback) => callback(null, [{ address: '127.0.0.1', family: 4 }]) },
+      });
+      const headers = mergeOutboundTokenHeader({ 'User-Agent': 'TestBot/1.0' }, undefined);
+      const res = await undiciFetch(`http://token-test.invalid:${port}/`, { headers, dispatcher: agent });
+      const text = await res.text();
+      assert.equal(text, 'false');
+    } finally {
+      await close();
+    }
   });
 });

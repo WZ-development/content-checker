@@ -11,6 +11,7 @@ const { createApp } = require('../../src/app');
 const { openDatabase } = require('../../src/db/database');
 const { createProjectsRepository } = require('../../src/db/projectsRepository');
 const { createFakeFetch, createFakeDnsLookup } = require('../sitemap/testHarness');
+const { OUTBOUND_TOKEN_HEADER_NAME } = require('../../lib/net/pinnedFetch');
 
 const TEST_PASSWORD = 'correct-horse-battery-staple';
 const TEAM_PASSWORD_HASH = bcrypt.hashSync(TEST_PASSWORD, 4);
@@ -854,5 +855,208 @@ describe('connection pinning wiring (requirement 14)', () => {
     // Blocked — never actually connects to loopback — and reported as a
     // failure, not silently ignored or crashed.
     assert.match(res.text, /failed|not permitted|disallowed/i);
+  });
+});
+
+describe('outbound identification token (sprint 7, requirements 1/2)', () => {
+  const TOKEN = 'a'.repeat(40);
+
+  test('the header is present on every outbound request type: initial fetch, child sitemap, title fetch, and a redirect hop', async () => {
+    const routes = fullDiffRoutes();
+    // Route live's post-sitemap.xml through one redirect hop first, so
+    // this test also covers requirement 1's "every redirect hop" case —
+    // httpClient.js's redirect loop calls fetchImpl fresh per hop, so
+    // both the original and the redirected-to URL must carry the header.
+    routes['https://live.test/post-sitemap.xml'] = {
+      status: 302,
+      headers: { location: 'https://live.test/post-sitemap-redirected.xml' },
+    };
+    routes['https://live.test/post-sitemap-redirected.xml'] = { body: LIVE_POST_XML };
+
+    const { app, fetchImpl } = createTestApp({ routes, configOverrides: { outboundToken: TOKEN } });
+    const agent = await loginAgent(app);
+    const id = await createProject(agent);
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+
+    const byUrl = (needle) => {
+      const entry = fetchImpl.log.find((e) => e.url.includes(needle));
+      assert.ok(entry, `expected an outbound request to something matching "${needle}"`);
+      return entry;
+    };
+
+    // Initial fetch — the root sitemap document.
+    assert.equal(byUrl('sitemap_index.xml').headers[OUTBOUND_TOKEN_HEADER_NAME], TOKEN);
+    // A child sitemap.
+    assert.equal(byUrl('page-sitemap.xml').headers[OUTBOUND_TOKEN_HEADER_NAME], TOKEN);
+    // A title fetch (lib/compare, not lib/sitemap).
+    assert.equal(byUrl('/old-page/').headers[OUTBOUND_TOKEN_HEADER_NAME], TOKEN);
+    // Both hops of the redirect.
+    assert.equal(byUrl('post-sitemap.xml').headers[OUTBOUND_TOKEN_HEADER_NAME], TOKEN);
+    assert.equal(byUrl('post-sitemap-redirected.xml').headers[OUTBOUND_TOKEN_HEADER_NAME], TOKEN);
+  });
+
+  test('the header is absent from every request when no token is configured (requirement 2)', async () => {
+    const { app, fetchImpl } = createTestApp({ routes: fullDiffRoutes() }); // no outboundToken override
+    const agent = await loginAgent(app);
+    const id = await createProject(agent);
+    const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+    await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+
+    assert.ok(fetchImpl.log.length > 0, 'sanity: requests were actually made');
+    assert.ok(
+      fetchImpl.log.every((entry) => !(OUTBOUND_TOKEN_HEADER_NAME in entry.headers)),
+      'no outbound request should carry the header when the token is unconfigured'
+    );
+  });
+
+  test('neither the crawler nor the title fetcher sets the header independently (structural)', () => {
+    for (const dir of ['lib/sitemap', 'lib/compare']) {
+      const fullDir = path.join(__dirname, '..', '..', dir);
+      for (const file of fs.readdirSync(fullDir)) {
+        if (!file.endsWith('.js')) continue;
+        const contents = fs.readFileSync(path.join(fullDir, file), 'utf8');
+        assert.ok(
+          !/contentcheck-token/i.test(contents),
+          `${dir}/${file} must not reference the outbound token header itself — only lib/net/pinnedFetch.js may`
+        );
+      }
+    }
+  });
+
+  describe('the token value never leaks into logs, error text, or rendered output (requirement 9)', () => {
+    // A distinctive, easy-to-grep-for value — nothing this project would
+    // ever coincidentally produce on its own, so any match below is
+    // unambiguously a leak, not a false positive.
+    const SECRET = 'sprint7-outbound-token-must-never-leak-abc123';
+
+    /**
+     * Runs one scan against `routes`/`dnsLookup` with the token
+     * configured, capturing everything console.log/console.error wrote
+     * during the request (src/app.js's own error handler, and
+     * scanErrorPresentation's "unexpected error" branch, both log via
+     * console) alongside the rendered response body — the two places
+     * requirement 9 says the value must never appear (server logs,
+     * rendered output), plus every header actually sent (where it's
+     * SUPPOSED to appear, per requirement 1 — this is captured too so
+     * the test can tell "leaked somewhere it shouldn't" apart from "the
+     * feature is working").
+     */
+    async function scanAndCapture({ routes, dnsLookup, projectOverrides }) {
+      const { app } = createTestApp({
+        routes,
+        dnsLookup,
+        configOverrides: { outboundToken: SECRET },
+      });
+      const agent = await loginAgent(app);
+      const id = await createProject(agent, projectOverrides);
+      const csrfToken = extractCsrfToken((await agent.get(`/projects/${id}/scan`)).text);
+
+      const originalLog = console.log;
+      const originalError = console.error;
+      const captured = [];
+      console.log = (...args) => captured.push(args.join(' '));
+      console.error = (...args) => captured.push(args.join(' '));
+      let res;
+      try {
+        res = await agent.post(`/projects/${id}/scan`).type('form').send({ _csrf: csrfToken });
+      } finally {
+        console.log = originalLog;
+        console.error = originalError;
+      }
+      return { res, consoleOutput: captured.join('\n') };
+    }
+
+    function assertNoLeak(res, consoleOutput, label) {
+      assert.doesNotMatch(res.text, new RegExp(SECRET), `${label}: token must not appear in rendered output`);
+      assert.doesNotMatch(consoleOutput, new RegExp(SECRET), `${label}: token must not appear in server logs`);
+    }
+
+    test('a staging 401 (every discovery attempt) never leaks the token', async () => {
+      const routes = {
+        'https://live.test/robots.txt': notFound(),
+        'https://live.test/sitemap_index.xml': { body: LIVE_INDEX_XML },
+        'https://live.test/page-sitemap.xml': { body: LIVE_PAGE_XML },
+        'https://live.test/post-sitemap.xml': { body: LIVE_POST_XML },
+        'https://live.test/old-page/': html('Old Page Title'),
+        'https://staging.test/robots.txt': { status: 401 },
+        'https://staging.test/sitemap_index.xml': { status: 401 },
+        'https://staging.test/wp-sitemap.xml': { status: 401 },
+        'https://staging.test/sitemap.xml': { status: 401 },
+      };
+      const { res, consoleOutput } = await scanAndCapture({ routes });
+      assert.match(res.text, /\.htaccess/);
+      assertNoLeak(res, consoleOutput, 'staging 401');
+    });
+
+    test('a live 403 (every discovery attempt) never leaks the token', async () => {
+      const routes = {
+        'https://live.test/robots.txt': { status: 403 },
+        'https://live.test/sitemap_index.xml': { status: 403 },
+        'https://live.test/wp-sitemap.xml': { status: 403 },
+        'https://live.test/sitemap.xml': { status: 403 },
+        'https://staging.test/robots.txt': notFound(),
+        'https://staging.test/sitemap_index.xml': { body: STAGING_INDEX_XML },
+        'https://staging.test/page-sitemap.xml': { body: STAGING_PAGE_XML },
+        'https://staging.test/post-sitemap.xml': { body: STAGING_POST_XML },
+        'https://staging.test/new-page/': html('New Page Title'),
+      };
+      const { res, consoleOutput } = await scanAndCapture({ routes });
+      assert.match(res.text, /refused the request/i);
+      assertNoLeak(res, consoleOutput, 'live 403');
+    });
+
+    test('a live-side CDN challenge (cf-mitigated) never leaks the token', async () => {
+      const challenged = { status: 403, headers: { server: 'cloudflare', 'cf-mitigated': 'challenge' } };
+      const routes = {
+        'https://live.test/robots.txt': challenged,
+        'https://live.test/sitemap_index.xml': challenged,
+        'https://live.test/wp-sitemap.xml': challenged,
+        'https://live.test/sitemap.xml': challenged,
+        'https://staging.test/robots.txt': notFound(),
+        'https://staging.test/sitemap_index.xml': { body: STAGING_INDEX_XML },
+        'https://staging.test/page-sitemap.xml': { body: STAGING_PAGE_XML },
+        'https://staging.test/post-sitemap.xml': { body: STAGING_POST_XML },
+        'https://staging.test/new-page/': html('New Page Title'),
+      };
+      const { res, consoleOutput } = await scanAndCapture({ routes });
+      assert.match(res.text, /challenge/i);
+      assert.match(res.text, /docs\/cdn-allow-rule\.md/);
+      assertNoLeak(res, consoleOutput, 'CDN challenge');
+    });
+
+    test('a DNS resolution failure never leaks the token', async () => {
+      const routes = {
+        'https://live.test/robots.txt': notFound(),
+        'https://live.test/sitemap_index.xml': { body: LIVE_INDEX_XML },
+        'https://live.test/page-sitemap.xml': { body: LIVE_PAGE_XML },
+        'https://live.test/post-sitemap.xml': { body: LIVE_POST_XML },
+        'https://live.test/old-page/': html('Old Page Title'),
+      };
+      const { res, consoleOutput } = await scanAndCapture({
+        routes,
+        projectOverrides: { stagingUrl: 'https://unresolvable.test' },
+      });
+      assert.match(res.text, /Could not resolve this site.{1,6}s domain name/);
+      assertNoLeak(res, consoleOutput, 'DNS failure');
+    });
+
+    test('a malformed-XML sitemap never leaks the token', async () => {
+      const routes = {
+        'https://live.test/robots.txt': notFound(),
+        'https://live.test/sitemap_index.xml': { body: LIVE_INDEX_XML },
+        'https://live.test/page-sitemap.xml': { body: LIVE_PAGE_XML },
+        'https://live.test/post-sitemap.xml': { body: LIVE_POST_XML },
+        'https://live.test/old-page/': html('Old Page Title'),
+        'https://staging.test/robots.txt': notFound(),
+        'https://staging.test/sitemap_index.xml': { body: '<not-even-close-to-xml' },
+        'https://staging.test/wp-sitemap.xml': { body: '<not-even-close-to-xml' },
+        'https://staging.test/sitemap.xml': { body: '<not-even-close-to-xml' },
+      };
+      const { res, consoleOutput } = await scanAndCapture({ routes });
+      assertNoLeak(res, consoleOutput, 'malformed XML');
+    });
   });
 });

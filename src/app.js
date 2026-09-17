@@ -17,14 +17,14 @@ const { createProjectsRouter } = require('./routes/projects');
 const { createScanRouter } = require('./routes/scan');
 const { openDatabase } = require('./db/database');
 const { createProjectsRepository } = require('./db/projectsRepository');
-const { createPinnedFetch } = require('../lib/net/pinnedFetch');
+const { createPinnedFetch, wrapFetchWithOutboundToken } = require('../lib/net/pinnedFetch');
 
 const DEFAULT_DB_PATH = path.join(__dirname, '..', 'data', 'content-checker.db');
 
 /**
  * Builds a mountable Express application. Everything — routes, the
  * session cookie, static assets — lives under `config.basePath`, so the
- * same app runs unmodified at `/` in development and `/content-check` in
+ * same app runs unmodified at `/` in development and `/content-checker` in
  * production.
  *
  * `repository` is injectable so tests can pass one backed by an
@@ -39,6 +39,13 @@ const DEFAULT_DB_PATH = path.join(__dirname, '..', 'data', 'content-checker.db')
  * handed to the scan router, which passes it unchanged into both
  * lib/sitemap's crawler and lib/compare's title fetcher. No other
  * module ever constructs its own fetch implementation.
+ *
+ * Sprint 7, requirement 1: whichever fetchImpl this ends up using (real
+ * pinned, or a test's injected fake) is then wrapped exactly once with
+ * wrapFetchWithOutboundToken — deliberately AFTER the test-injection
+ * decision above, not folded into createPinnedFetch itself, so a test
+ * that injects its own fake fetchImpl (to stay off the real network)
+ * still exercises the real token-injection path, not a bypassed one.
  */
 function createApp(config, { repository, fetchImpl, dnsLookup } = {}) {
   const app = express();
@@ -50,9 +57,13 @@ function createApp(config, { repository, fetchImpl, dnsLookup } = {}) {
   // supplying a fake fetch almost always wants its own dnsLookup too
   // (see test/sitemap/testHarness.js), but falls back to the real
   // resolver if it didn't provide one, rather than silently pinning.
-  const pinnedFetch = fetchImpl
+  const baseFetch = fetchImpl
     ? { fetchImpl, dnsLookup: dnsLookup || dns.promises.lookup }
     : createPinnedFetch({ dnsLookup });
+  const pinnedFetch = {
+    fetchImpl: wrapFetchWithOutboundToken(baseFetch.fetchImpl, config.outboundToken),
+    dnsLookup: baseFetch.dnsLookup,
+  };
 
   app.set('trust proxy', 1);
   app.set('view engine', 'ejs');
@@ -71,7 +82,7 @@ function createApp(config, { repository, fetchImpl, dnsLookup } = {}) {
 
   // Scoping the cookie to BASE_PATH (rather than the express-session
   // default of "/") matters on a shared host: production mounts this app
-  // at /content-check alongside sibling tools on the same domain, and an
+  // at /content-checker alongside sibling tools on the same domain, and an
   // unscoped cookie would be sent to every one of them.
   const cookiePath = config.basePath || '/';
 
@@ -117,6 +128,7 @@ function createApp(config, { repository, fetchImpl, dnsLookup } = {}) {
       repository: projectsRepository,
       fetchImpl: pinnedFetch.fetchImpl,
       dnsLookup: pinnedFetch.dnsLookup,
+      outboundTokenConfigured: Boolean(config.outboundToken),
     })
   );
 

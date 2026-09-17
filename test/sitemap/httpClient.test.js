@@ -12,6 +12,7 @@ const {
   SitemapTimeoutError,
   SsrfBlockedError,
   TooManyRedirectsError,
+  CdnChallengeError,
 } = require('../../lib/sitemap/errors');
 const { createFakeFetch, createFakeDnsLookup } = require('./testHarness');
 
@@ -84,6 +85,59 @@ describe('createGuardedFetch', () => {
       await assert.rejects(() => guardedFetch('https://good.test/forbidden.xml'), (err) => {
         assert.ok(err instanceof HttpAuthError);
         assert.equal(err.code, 'HTTP_403');
+        return true;
+      });
+    });
+
+    test('a response carrying cf-mitigated: challenge is CdnChallengeError, not HttpAuthError (requirement 6)', async () => {
+      const { guardedFetch } = makeGuardedFetch({
+        'https://good.test/challenged.xml': {
+          status: 403,
+          headers: { server: 'cloudflare', 'cf-mitigated': 'challenge' },
+        },
+      });
+      await assert.rejects(() => guardedFetch('https://good.test/challenged.xml'), (err) => {
+        assert.ok(err instanceof CdnChallengeError, `expected CdnChallengeError, got ${err.constructor.name}`);
+        assert.ok(!(err instanceof HttpAuthError), 'must not ALSO be an HttpAuthError');
+        assert.equal(err.code, 'CDN_CHALLENGE');
+        assert.equal(err.status, 403);
+        return true;
+      });
+    });
+
+    test('a plain 403 with no cf-mitigated header is unchanged — still HttpAuthError (no regression)', async () => {
+      const { guardedFetch } = makeGuardedFetch({
+        'https://good.test/plain-403.xml': { status: 403 },
+      });
+      await assert.rejects(() => guardedFetch('https://good.test/plain-403.xml'), (err) => {
+        assert.ok(err instanceof HttpAuthError);
+        assert.ok(!(err instanceof CdnChallengeError));
+        assert.equal(err.code, 'HTTP_403');
+        return true;
+      });
+    });
+
+    test('a 403 carrying cf-mitigated with some OTHER value is not treated as a challenge (matches the header value, not just its presence)', async () => {
+      const { guardedFetch } = makeGuardedFetch({
+        'https://good.test/other-mitigation.xml': {
+          status: 403,
+          headers: { 'cf-mitigated': 'something-else' },
+        },
+      });
+      await assert.rejects(() => guardedFetch('https://good.test/other-mitigation.xml'), (err) => {
+        assert.ok(err instanceof HttpAuthError);
+        assert.ok(!(err instanceof CdnChallengeError));
+        return true;
+      });
+    });
+
+    test('a plain 401 is still HttpAuthError, unaffected by the challenge check (no regression)', async () => {
+      const { guardedFetch } = makeGuardedFetch({
+        'https://good.test/plain-401.xml': { status: 401 },
+      });
+      await assert.rejects(() => guardedFetch('https://good.test/plain-401.xml'), (err) => {
+        assert.ok(err instanceof HttpAuthError);
+        assert.equal(err.code, 'HTTP_401');
         return true;
       });
     });

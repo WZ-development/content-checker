@@ -1,7 +1,7 @@
 # Content Checker
 
 Shared-password-gated Express app. Server-rendered templates, no frontend
-build step. Production target: `tools.wordzite.com/content-check`.
+build step. Production target: `tools.wordzite.com/content-checker`.
 
 ## Setup
 
@@ -43,6 +43,14 @@ the DNS lookup used to approve an address is the exact same lookup used
 to open the connection, so there's no window between "checked safe" and
 "connected to" for an address to change in.
 
+Every outbound request also carries an `X-ContentCheck-Token` header
+(from `CONTENTCHECK_OUTBOUND_TOKEN`, optional) so a client's CDN/WAF can
+allow this tool through a bot challenge with a rule that can't be
+spoofed by copying a `User-Agent` string — see
+[`docs/cdn-allow-rule.md`](docs/cdn-allow-rule.md) for the rule to add
+on the client's side, and `npm run generate-outbound-token` to generate
+a value.
+
 ## Run
 
 ```bash
@@ -54,7 +62,7 @@ npm run lint     # eslint
 To run mounted under a subpath, the way it's deployed in production:
 
 ```bash
-BASE_PATH=/content-check npm start
+BASE_PATH=/content-checker npm start
 ```
 
 Every internal link, form action, redirect, and static asset reference

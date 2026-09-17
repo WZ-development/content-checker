@@ -108,6 +108,43 @@ describe('loadConfig', () => {
     assert.equal(config.basePath, '');
   });
 
+  describe('CONTENTCHECK_OUTBOUND_TOKEN (sprint 7, requirement 2)', () => {
+    test('is undefined when unset — optional, not a required variable', () => {
+      const config = loadConfig(VALID_ENV);
+      assert.equal(config.outboundToken, undefined);
+    });
+
+    test('is undefined when set to an empty/whitespace-only string', () => {
+      const config = loadConfig({ ...VALID_ENV, CONTENTCHECK_OUTBOUND_TOKEN: '   ' });
+      assert.equal(config.outboundToken, undefined);
+    });
+
+    test('throws a ConfigError naming the variable when set but shorter than 32 characters', () => {
+      const env = { ...VALID_ENV, CONTENTCHECK_OUTBOUND_TOKEN: 'too-short' };
+      assert.throws(
+        () => loadConfig(env),
+        (err) => {
+          assert.ok(err instanceof ConfigError);
+          assert.match(err.message, /CONTENTCHECK_OUTBOUND_TOKEN/);
+          assert.match(err.message, /32/);
+          return true;
+        }
+      );
+    });
+
+    test('accepts a value that is exactly 32 characters', () => {
+      const token = 'a'.repeat(32);
+      const config = loadConfig({ ...VALID_ENV, CONTENTCHECK_OUTBOUND_TOKEN: token });
+      assert.equal(config.outboundToken, token);
+    });
+
+    test('accepts a longer generated-style token unchanged', () => {
+      const token = require('node:crypto').randomBytes(32).toString('hex'); // 64 chars
+      const config = loadConfig({ ...VALID_ENV, CONTENTCHECK_OUTBOUND_TOKEN: token });
+      assert.equal(config.outboundToken, token);
+    });
+  });
+
   test('defaults BASE_PATH "/" to the empty (root) base path', () => {
     const config = loadConfig({ ...VALID_ENV, BASE_PATH: '/' });
     assert.equal(config.basePath, '');

@@ -40,8 +40,8 @@
     "7": {
       "title": "Outbound identification token and CDN challenge guidance",
       "epic": "Deployment",
-      "status": "todo",
-      "file": "docs/sprints/1-todo/sprint-7_outbound-identification-token-and-cdn-challenge-guidance.md"
+      "status": "in_progress",
+      "file": "docs/sprints/2-in-progress/sprint-7_outbound-identification-token-and-cdn-challenge-guidance.md"
     }
   }
 }

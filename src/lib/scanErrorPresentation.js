@@ -1,12 +1,14 @@
 'use strict';
 
 const { errors } = require('../../lib/sitemap/index');
+const { OUTBOUND_TOKEN_HEADER_NAME } = require('../../lib/net/pinnedFetch');
 
 const STAGING_AUTH_MESSAGE =
   'This staging site requires HTTP Basic Auth (.htaccess) credentials to access its sitemap. Add them on the project’s edit screen.';
 
 const AUTH_CODES = new Set(['HTTP_401', 'HTTP_403']);
 const DNS_ERROR_CODE = 'DNS_ERROR';
+const CDN_CHALLENGE_CODE = 'CDN_CHALLENGE';
 
 /**
  * QA1's Sprint 5 audit, finding B: automatic discovery (robots.txt, then
@@ -70,6 +72,55 @@ function describeLiveAuthMessage(status) {
 }
 
 /**
+ * Sprint 7, requirements 6-7: finds a discovery attempt that hit a CDN
+ * challenge specifically — same shape as findAuthAttempt/
+ * allAttemptsFailedWithCode above, reading the `error` code discovery.js
+ * already records on every failed attempt (it copies `err.code`
+ * verbatim, so CdnChallengeError's 'CDN_CHALLENGE' arrives here exactly
+ * the same way 'HTTP_401'/'DNS_ERROR' already do — no new plumbing
+ * needed in lib/sitemap for this to work). Checked separately from
+ * findAuthAttempt because httpClient.js already classifies a genuine
+ * challenge response as CdnChallengeError, never as HttpAuthError, so
+ * the two codes are mutually exclusive per attempt — this only needs to
+ * ask "did ANY attempt see one," the same as the auth check does.
+ */
+function findChallengeAttempt(discoveryFailedError) {
+  return (discoveryFailedError.attempts || []).find((attempt) => attempt.error === CDN_CHALLENGE_CODE);
+}
+
+/**
+ * Sprint 7, requirement 7: the actionable CDN-challenge message. Built
+ * once here so the direct-error path and the discovery-attempts path
+ * (both branches in describeSitemapError below) render identical text.
+ *
+ * `outboundTokenConfigured` controls only which sentence leads — the
+ * rule text itself (header name, WAF expression, Skip action, doc link)
+ * is always shown either way, since a developer configuring the token
+ * for the first time still needs to know what rule to add once it's set.
+ * The WAF expression always uses `<your token>` as a literal placeholder
+ * — this module never has the real token value in scope to begin with
+ * (it only ever sees `outboundTokenConfigured`, a boolean), so there is
+ * no real value that could accidentally end up here.
+ */
+function describeCdnChallengeMessage(outboundTokenConfigured) {
+  const headerNameLower = OUTBOUND_TOKEN_HEADER_NAME.toLowerCase();
+  const ruleText =
+    `This looks like a CDN or firewall challenge, not a credentials problem — the site's ` +
+    `protection is blocking the scan before it ever reaches your app. To let this tool ` +
+    `through, add an allow rule keyed on the ${OUTBOUND_TOKEN_HEADER_NAME} header: a Cloudflare ` +
+    `WAF expression of (http.request.headers["${headerNameLower}"][0] eq "<your token>"), action ` +
+    `Skip. Full details (including which protection components to skip): docs/cdn-allow-rule.md.`;
+
+  if (!outboundTokenConfigured) {
+    return (
+      `An outbound identification token is not configured (CONTENTCHECK_OUTBOUND_TOKEN is unset), ` +
+      `so there's nothing yet for an allow rule to match on — set that first. ${ruleText}`
+    );
+  }
+  return ruleText;
+}
+
+/**
  * Maps a thrown lib/sitemap error into an actionable message for the
  * scan results screen (requirement 10). `side` ('live' | 'staging')
  * changes the auth-error wording, since only staging has a credential
@@ -88,8 +139,15 @@ function describeLiveAuthMessage(status) {
  * Returns { message, editUrl }. `editUrl` is only ever set for the
  * staging-side auth case; the view treats its presence as "show a link
  * here," nothing more.
+ *
+ * `outboundTokenConfigured` (sprint 7, requirement 7) only feeds the
+ * CDN-challenge message's lead sentence — every other branch ignores it.
  */
-function describeSitemapError(err, { side, editUrl }) {
+function describeSitemapError(err, { side, editUrl, outboundTokenConfigured }) {
+  if (err instanceof errors.CdnChallengeError) {
+    return { message: describeCdnChallengeMessage(outboundTokenConfigured) };
+  }
+
   if (err instanceof errors.HttpAuthError) {
     if (side === 'staging') {
       return { message: STAGING_AUTH_MESSAGE, editUrl };
@@ -98,6 +156,11 @@ function describeSitemapError(err, { side, editUrl }) {
   }
 
   if (err instanceof errors.SitemapDiscoveryFailedError) {
+    const challengeAttempt = findChallengeAttempt(err);
+    if (challengeAttempt) {
+      return { message: describeCdnChallengeMessage(outboundTokenConfigured) };
+    }
+
     const authAttempt = findAuthAttempt(err);
     if (authAttempt) {
       if (side === 'staging') {
